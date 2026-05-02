@@ -776,7 +776,7 @@ fn path_to_string(path: PathBuf) -> String {
 fn app_config_dir() -> CommandResult<PathBuf> {
     let config_dir = dirs_next::config_dir()
         .ok_or_else(|| CommandError::new("not_found", "Could not determine config directory"))?;
-    Ok(config_dir.join("LittleCommander"))
+    Ok(config_dir.join("Bobroot"))
 }
 
 fn session_file_path() -> CommandResult<PathBuf> {
@@ -814,5 +814,5 @@ pub fn run() {
             append_action_log
         ])
         .run(tauri::generate_context!())
-        .expect("error while running LittleCommander");
+        .expect("error while running Bobroot");
 }

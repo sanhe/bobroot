@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LittleCommander</title>
+    <title>Bobroot</title>
   </head>
   <body>
     <div id="root"></div>
@@ -11,8 +11,8 @@
       const isLocalTestHost =
         window.location.hostname === "127.0.0.1" ||
         window.location.hostname === "localhost";
-      if (isLocalTestHost && new URLSearchParams(window.location.search).has("lc-test")) {
-        window.__LC_TEST_ACTIONS = [];
+      if (isLocalTestHost && new URLSearchParams(window.location.search).has("br-test")) {
+        window.__BR_TEST_ACTIONS = [];
         const modified = Date.now();
         const directories = {
           "/mock/Downloads": [
@@ -62,8 +62,8 @@
                 action: args.action,
                 details: args.details ?? {},
               };
-              window.__LC_TEST_ACTIONS.push(entry);
-              console.log("LC_ACTION_LOG", JSON.stringify(entry));
+              window.__BR_TEST_ACTIONS.push(entry);
+              console.log("BR_ACTION_LOG", JSON.stringify(entry));
               return null;
             }
             if (cmd.startsWith("plugin:window|")) {

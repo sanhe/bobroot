@@ -1,6 +1,6 @@
-# LittleCommander
+# Bobroot
 
-LittleCommander is a small cross-platform desktop file manager for macOS, Ubuntu, and Windows. It uses a classic dual-pane layout with a minimal Apple-like interface, independent tabs per panel, session restore, basic filesystem operations, and system-native file preview where available.
+Bobroot is a small cross-platform desktop file manager for macOS, Ubuntu, and Windows. It uses a classic dual-pane layout with a minimal Apple-like interface, independent tabs per panel, session restore, basic filesystem operations, and system-native file preview where available.
 
 ## Stack
 

@@ -1,12 +1,12 @@
 [package]
-name = "littlecommander"
+name = "bobroot"
 version = "0.1.0"
 description = "A minimal dual-pane file manager."
-authors = ["LittleCommander"]
+authors = ["Bobroot"]
 edition = "2021"
 
 [lib]
-name = "littlecommander_lib"
+name = "bobroot_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

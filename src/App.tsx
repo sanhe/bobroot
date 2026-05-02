@@ -967,7 +967,7 @@ function App() {
   if (!session) {
     return (
       <main className="app-shell loading-shell">
-        <div className="initializing">Opening LittleCommander...</div>
+        <div className="initializing">Opening Bobroot...</div>
       </main>
     );
   }
@@ -975,7 +975,7 @@ function App() {
   return (
     <main className="app-shell">
       <header className="app-bar">
-        <div className="brand">LittleCommander</div>
+        <div className="brand">Bobroot</div>
         <div className="global-actions">
           <IconButton
             disabled={!rightPanelVisible}

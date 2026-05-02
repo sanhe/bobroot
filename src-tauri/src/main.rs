@@ -1,3 +1,3 @@
 fn main() {
-    littlecommander_lib::run();
+    bobroot_lib::run();
 }
