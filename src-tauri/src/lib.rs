@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
-    time::UNIX_EPOCH,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 type CommandResult<T> = Result<T, CommandError>;
@@ -86,6 +87,7 @@ struct SessionData {
     left: PanelSession,
     right: PanelSession,
     active_panel: Option<String>,
+    right_panel_visible: Option<bool>,
     show_hidden_files: Option<bool>,
     window: Option<WindowSession>,
 }
@@ -123,6 +125,14 @@ struct WindowSession {
     height: u32,
     x: Option<i32>,
     y: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActionLogLine {
+    timestamp: u64,
+    action: String,
+    details: serde_json::Value,
 }
 
 #[tauri::command]
@@ -415,6 +425,35 @@ fn save_session(session: SessionData) -> CommandResult<()> {
 
     let bytes = serde_json::to_vec_pretty(&session)?;
     fs::write(path, bytes)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn append_action_log(action: String, details: serde_json::Value) -> CommandResult<()> {
+    let action = action.trim();
+    if action.is_empty() {
+        return Err(CommandError::new(
+            "invalid_action",
+            "Action name is required",
+        ));
+    }
+
+    let path = action_log_file_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let line = ActionLogLine {
+        timestamp: current_timestamp_millis(),
+        action: action.to_string(),
+        details,
+    };
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    serde_json::to_writer(&mut file, &line)?;
+    file.write_all(b"\n")?;
     Ok(())
 }
 
@@ -734,10 +773,25 @@ fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn session_file_path() -> CommandResult<PathBuf> {
+fn app_config_dir() -> CommandResult<PathBuf> {
     let config_dir = dirs_next::config_dir()
         .ok_or_else(|| CommandError::new("not_found", "Could not determine config directory"))?;
-    Ok(config_dir.join("LittleCommander").join("session.json"))
+    Ok(config_dir.join("LittleCommander"))
+}
+
+fn session_file_path() -> CommandResult<PathBuf> {
+    Ok(app_config_dir()?.join("session.json"))
+}
+
+fn action_log_file_path() -> CommandResult<PathBuf> {
+    Ok(app_config_dir()?.join("actions.jsonl"))
+}
+
+fn current_timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -756,7 +810,8 @@ pub fn run() {
             rename_item,
             create_folder,
             load_session,
-            save_session
+            save_session,
+            append_action_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running LittleCommander");

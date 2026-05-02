@@ -12,6 +12,7 @@ LittleCommander is a small cross-platform desktop file manager for macOS, Ubuntu
 ## Current Features
 
 - Left and right file panels
+- Right panel can be shown or hidden for single-panel work
 - Independent tabs in each panel
 - Per-tab path, selection, and navigation history state
 - Session restore for tabs, active panel, active tabs, paths, hidden-file visibility, and window size/position where the platform allows it
@@ -25,6 +26,7 @@ LittleCommander is a small cross-platform desktop file manager for macOS, Ubuntu
 - Rename, create folder, move to Trash/Bin/Recycle Bin, and permanent delete with confirmation
 - System-native preview from the selected item, including Quick Look on macOS
 - Context menu reveal command: Finder, Files, or Explorer depending on platform
+- Local JSONL action log at the app config path, including file-manager actions and paths
 
 ## Development Setup
 

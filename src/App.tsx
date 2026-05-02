@@ -6,6 +6,8 @@ import {
   FolderPlus,
   FolderSync,
   MoveRight,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Trash2,
   TriangleAlert,
@@ -16,6 +18,7 @@ import {
   getHomeDir,
   listDirectory,
   loadSession,
+  logAction,
   moveItems,
   moveToTrash,
   openPath,
@@ -45,6 +48,7 @@ import {
   trashTargetName,
 } from "./lib/platform";
 import type {
+  ActionLogDetails,
   ConflictStrategy,
   DirectoryListing,
   FileEntry,
@@ -92,11 +96,19 @@ function App() {
   const permanentShortcut = useMemo(() => permanentDeleteShortcut(platform), [platform]);
   const revealLabel = useMemo(() => revealActionLabel(platform), [platform]);
   const activePanelId = session?.activePanel ?? "left";
+  const rightPanelVisible = session?.rightPanelVisible ?? true;
   const showHiddenFiles = session?.showHiddenFiles ?? false;
 
   const reportNotice = useCallback((message: string | null) => {
     setNotice(message);
   }, []);
+
+  const recordAction = useCallback(
+    (action: string, details: ActionLogDetails = {}) => {
+      void logAction(action, details).catch(() => undefined);
+    },
+    [],
+  );
 
   const loadTab = useCallback(
     async (panelId: PanelId, tab: TabState, force = false) => {
@@ -164,14 +176,15 @@ function App() {
         }
 
         const initialSession = saved
-          ? normalizeSession(saved, home)
-          : {
-              left: createPanel(home),
-              right: createPanel(home),
-              activePanel: "left" as const,
-              showHiddenFiles: false,
-              window: null,
-            };
+            ? normalizeSession(saved, home)
+            : {
+                left: createPanel(home),
+                right: createPanel(home),
+                activePanel: "left" as const,
+                rightPanelVisible: true,
+                showHiddenFiles: false,
+                window: null,
+              };
 
         setSession(initialSession);
         await restoreWindowSession(initialSession.window);
@@ -193,8 +206,10 @@ function App() {
 
     const visibleTabs: Array<[PanelId, TabState]> = [
       ["left", activeTab(session.left)],
-      ["right", activeTab(session.right)],
     ];
+    if (session.rightPanelVisible) {
+      visibleTabs.push(["right", activeTab(session.right)]);
+    }
 
     for (const [panelId, tab] of visibleTabs) {
       void loadTab(panelId, tab);
@@ -203,6 +218,7 @@ function App() {
     loadTab,
     session?.left.activeTabId,
     session?.right.activeTabId,
+    session?.rightPanelVisible,
     session?.showHiddenFiles,
     session?.left.tabs,
     session?.right.tabs,
@@ -262,23 +278,30 @@ function App() {
   }, [contextMenu]);
 
   const setActivePanel = useCallback((panelId: PanelId) => {
+    recordAction("activate_panel", { panelId });
     setSession((previous) =>
-      previous ? { ...previous, activePanel: panelId } : previous,
+      previous && (panelId === "left" || previous.rightPanelVisible)
+        ? { ...previous, activePanel: panelId }
+        : previous,
     );
-  }, []);
+  }, [recordAction]);
 
   const switchPanel = useCallback(() => {
+    recordAction("switch_panel");
     setSession((previous) =>
       previous
         ? {
             ...previous,
-            activePanel: oppositePanel(previous.activePanel),
+            activePanel: previous.rightPanelVisible
+              ? oppositePanel(previous.activePanel)
+              : "left",
           }
         : previous,
     );
-  }, []);
+  }, [recordAction]);
 
   const switchTab = useCallback((panelId: PanelId, tabId: string) => {
+    recordAction("switch_tab", { panelId, tabId });
     setSession((previous) =>
       previous
         ? {
@@ -288,9 +311,10 @@ function App() {
           }
         : previous,
     );
-  }, []);
+  }, [recordAction]);
 
   const newTab = useCallback((panelId = activePanelId) => {
+    recordAction("new_tab", { panelId });
     setSession((previous) => {
       if (!previous) {
         return previous;
@@ -307,9 +331,10 @@ function App() {
         },
       };
     });
-  }, [activePanelId]);
+  }, [activePanelId, recordAction]);
 
   const closeTab = useCallback((panelId = activePanelId, tabId?: string) => {
+    recordAction("close_tab", { panelId, tabId: tabId ?? null });
     setSession((previous) => {
       if (!previous) {
         return previous;
@@ -334,17 +359,37 @@ function App() {
         [panelId]: { tabs, activeTabId: nextActive },
       };
     });
-  }, [activePanelId]);
+  }, [activePanelId, recordAction]);
+
+  const toggleRightPanel = useCallback(() => {
+    recordAction("toggle_right_panel", { visible: !rightPanelVisible });
+    setContextMenu(null);
+    setRenameState(null);
+    setSession((previous) => {
+      if (!previous) {
+        return previous;
+      }
+
+      const nextVisible = !previous.rightPanelVisible;
+      return {
+        ...previous,
+        activePanel: nextVisible ? previous.activePanel : "left",
+        rightPanelVisible: nextVisible,
+      };
+    });
+  }, [recordAction, rightPanelVisible]);
 
   const navigateTo = useCallback((panelId: PanelId, path: string) => {
+    recordAction("navigate", { panelId, path });
     setSession((previous) =>
       previous
         ? updateActiveTab(previous, panelId, (tab) => navigateTab(tab, path))
         : previous,
     );
-  }, []);
+  }, [recordAction]);
 
   const goParent = useCallback((panelId = activePanelId) => {
+    recordAction("go_parent", { panelId });
     if (!session) {
       return;
     }
@@ -354,10 +399,16 @@ function App() {
     if (listing?.parent) {
       navigateTo(panelId, listing.parent);
     }
-  }, [activePanelId, listings, navigateTo, session]);
+  }, [activePanelId, listings, navigateTo, recordAction, session]);
 
   const syncActivePanelToOpposite = useCallback(() => {
+    recordAction("match_opposite_panel_folder");
     if (!session) {
+      return;
+    }
+
+    if (!session.rightPanelVisible) {
+      reportNotice("Show the right panel to match folders between panels.");
       return;
     }
 
@@ -369,10 +420,11 @@ function App() {
     if (currentTab.path !== sourceTab.path) {
       navigateTo(panelId, sourceTab.path);
     }
-  }, [navigateTo, session]);
+  }, [navigateTo, recordAction, reportNotice, session]);
 
   const selectPath = useCallback(
     (panelId: PanelId, path: string, additive: boolean) => {
+      recordAction("select_item", { panelId, path, additive });
       setContextMenu(null);
       setSession((previous) =>
         previous
@@ -388,7 +440,7 @@ function App() {
           : previous,
       );
     },
-    [],
+    [recordAction],
   );
 
   const selectEntryByIndex = useCallback(
@@ -406,6 +458,11 @@ function App() {
 
       const nextIndex = clamp(index, 0, entries.length - 1);
       const nextPath = entries[nextIndex].path;
+      recordAction("select_item_by_index", {
+        panelId,
+        index: nextIndex,
+        path: nextPath,
+      });
       setSession((previous) =>
         previous
           ? updateActiveTab(previous, panelId, (current) => ({
@@ -415,11 +472,12 @@ function App() {
           : previous,
       );
     },
-    [listings, session],
+    [listings, recordAction, session],
   );
 
   const moveSelection = useCallback(
     (delta: number) => {
+      recordAction("move_selection", { delta });
       if (!session) {
         return;
       }
@@ -435,21 +493,24 @@ function App() {
       const fallbackIndex = delta > 0 ? -1 : entries.length;
       selectEntryByIndex((currentIndex >= 0 ? currentIndex : fallbackIndex) + delta);
     },
-    [listings, selectEntryByIndex, session],
+    [listings, recordAction, selectEntryByIndex, session],
   );
 
   const moveSelectionPage = useCallback(
     (direction: 1 | -1) => {
+      recordAction("move_selection_page", { direction });
       moveSelection(direction * getActivePanelPageSize());
     },
-    [moveSelection],
+    [moveSelection, recordAction],
   );
 
   const selectFirstRow = useCallback(() => {
+    recordAction("select_first_row");
     selectEntryByIndex(0);
-  }, [selectEntryByIndex]);
+  }, [recordAction, selectEntryByIndex]);
 
   const selectLastRow = useCallback(() => {
+    recordAction("select_last_row");
     if (!session) {
       return;
     }
@@ -457,10 +518,15 @@ function App() {
     const tab = activeTab(session[session.activePanel]);
     const entries = listings[tab.id]?.entries ?? [];
     selectEntryByIndex(entries.length - 1);
-  }, [listings, selectEntryByIndex, session]);
+  }, [listings, recordAction, selectEntryByIndex, session]);
 
   const openEntry = useCallback(
     async (panelId: PanelId, entry: FileEntry) => {
+      recordAction("open_entry", {
+        panelId,
+        path: entry.path,
+        isDir: entry.isDir,
+      });
       setActivePanel(panelId);
 
       if (entry.isDir) {
@@ -474,10 +540,11 @@ function App() {
         reportNotice(errorToMessage(error));
       }
     },
-    [navigateTo, reportNotice, setActivePanel],
+    [navigateTo, recordAction, reportNotice, setActivePanel],
   );
 
   const openSelected = useCallback(() => {
+    recordAction("open_selected", { panelId: session?.activePanel ?? null });
     if (!session) {
       return;
     }
@@ -487,9 +554,10 @@ function App() {
     if (entry) {
       void openEntry(session.activePanel, entry);
     }
-  }, [listings, openEntry, session]);
+  }, [listings, openEntry, recordAction, session]);
 
   const openFolderInNewTab = useCallback((panelId: PanelId, path: string) => {
+    recordAction("open_folder_in_new_tab", { panelId, path });
     setSession((previous) => {
       if (!previous) {
         return previous;
@@ -505,9 +573,12 @@ function App() {
         },
       };
     });
-  }, []);
+  }, [recordAction]);
 
   const openSelectedInNewTab = useCallback(() => {
+    recordAction("open_selected_in_new_tab", {
+      panelId: session?.activePanel ?? null,
+    });
     if (!session) {
       return;
     }
@@ -518,10 +589,16 @@ function App() {
     if (entry?.isDir) {
       openFolderInNewTab(panelId, entry.path);
     }
-  }, [listings, openFolderInNewTab, session]);
+  }, [listings, openFolderInNewTab, recordAction, session]);
 
   const openEntryContextMenu = useCallback(
     (panelId: PanelId, entry: FileEntry, position: { x: number; y: number }) => {
+      recordAction("open_context_menu", {
+        panelId,
+        path: entry.path,
+        x: position.x,
+        y: position.y,
+      });
       setActivePanel(panelId);
       setSession((previous) =>
         previous
@@ -540,11 +617,12 @@ function App() {
         y: position.y,
       });
     },
-    [setActivePanel],
+    [recordAction, setActivePanel],
   );
 
   const revealEntry = useCallback(
     async (entry: FileEntry) => {
+      recordAction("reveal_entry", { path: entry.path });
       setContextMenu(null);
       try {
         await revealPath(entry.path);
@@ -552,12 +630,18 @@ function App() {
         reportNotice(errorToMessage(error));
       }
     },
-    [reportNotice],
+    [recordAction, reportNotice],
   );
 
   const runTransfer = useCallback(
     async (mode: "copy" | "move") => {
+      recordAction("transfer_requested", { mode });
       if (!session) {
+        return;
+      }
+
+      if (!session.rightPanelVisible) {
+        reportNotice("Show the right panel to copy or move between panels.");
         return;
       }
 
@@ -574,6 +658,7 @@ function App() {
 
       const strategy = askConflictStrategy(mode);
       if (!strategy) {
+        recordAction("transfer_cancelled", { mode, reason: "no_conflict_strategy" });
         return;
       }
 
@@ -582,16 +667,35 @@ function App() {
           mode === "copy"
             ? await copyItems(items, destinationTab.path, strategy)
             : await moveItems(items, destinationTab.path, strategy);
+        recordAction("transfer_completed", {
+          mode,
+          sourcePanel,
+          destinationPanel,
+          items,
+          destinationDir: destinationTab.path,
+          strategy,
+          results: report.results,
+        });
         reportNotice(describeReport(report.results));
         await refreshVisiblePanels();
       } catch (error) {
+        recordAction("transfer_failed", {
+          mode,
+          sourcePanel,
+          destinationPanel,
+          items,
+          destinationDir: destinationTab.path,
+          strategy,
+          error: errorToMessage(error),
+        });
         reportNotice(errorToMessage(error));
       }
     },
-    [listings, refreshVisiblePanels, reportNotice, session],
+    [listings, recordAction, refreshVisiblePanels, reportNotice, session],
   );
 
   const trashSelected = useCallback(async () => {
+    recordAction("trash_requested", { panelId: session?.activePanel ?? null });
     if (!session) {
       return;
     }
@@ -606,19 +710,28 @@ function App() {
       `Move ${selectedPaths.length} selected item(s) to ${trashName}?`,
     );
     if (!confirmed) {
+      recordAction("trash_cancelled", { items: selectedPaths });
       return;
     }
 
     try {
       const report = await moveToTrash(selectedPaths);
+      recordAction("trash_completed", { items: selectedPaths, results: report.results });
       reportNotice(describeReport(report.results));
       await refreshPanel(session.activePanel);
     } catch (error) {
+      recordAction("trash_failed", {
+        items: selectedPaths,
+        error: errorToMessage(error),
+      });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, refreshPanel, reportNotice, session, trashName]);
+  }, [listings, recordAction, refreshPanel, reportNotice, session, trashName]);
 
   const deleteSelectedPermanently = useCallback(async () => {
+    recordAction("permanent_delete_requested", {
+      panelId: session?.activePanel ?? null,
+    });
     if (!session) {
       return;
     }
@@ -633,19 +746,29 @@ function App() {
       `Permanently delete ${selectedPaths.length} selected item(s)? This cannot be undone.`,
     );
     if (!confirmed) {
+      recordAction("permanent_delete_cancelled", { items: selectedPaths });
       return;
     }
 
     try {
       const report = await permanentlyDelete(selectedPaths);
+      recordAction("permanent_delete_completed", {
+        items: selectedPaths,
+        results: report.results,
+      });
       reportNotice(describeReport(report.results));
       await refreshPanel(session.activePanel);
     } catch (error) {
+      recordAction("permanent_delete_failed", {
+        items: selectedPaths,
+        error: errorToMessage(error),
+      });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, refreshPanel, reportNotice, session]);
+  }, [listings, recordAction, refreshPanel, reportNotice, session]);
 
   const renameSelected = useCallback(() => {
+    recordAction("rename_requested", { panelId: session?.activePanel ?? null });
     if (!session) {
       return;
     }
@@ -655,13 +778,15 @@ function App() {
     const selectedPaths = visibleSelectedPaths(tab, listing);
     const entry = findSelectedEntry(tab, listing);
     if (selectedPaths.length !== 1 || !entry) {
+      recordAction("rename_blocked", { reason: "selection_count", selectedPaths });
       reportNotice("Select exactly one item to rename.");
       return;
     }
 
+    recordAction("rename_started", { panelId, path: entry.path });
     setRenameState({ panelId, path: entry.path, name: entry.name });
     reportNotice(null);
-  }, [listings, reportNotice, session]);
+  }, [listings, recordAction, reportNotice, session]);
 
   const commitRename = useCallback(async () => {
     if (!renameState) {
@@ -673,11 +798,21 @@ function App() {
     setRenameState(null);
 
     if (!nextName || nextName === basename(current.path)) {
+      recordAction("rename_cancelled", {
+        path: current.path,
+        reason: nextName ? "unchanged" : "empty_name",
+      });
       return;
     }
 
     try {
       const nextPath = await renameItem(current.path, nextName);
+      recordAction("rename_completed", {
+        panelId: current.panelId,
+        source: current.path,
+        destination: nextPath,
+        newName: nextName,
+      });
       setSession((previous) =>
         previous
           ? updateActiveTab(previous, current.panelId, (tab) => ({
@@ -689,11 +824,28 @@ function App() {
       reportNotice(null);
       await refreshPanel(current.panelId);
     } catch (error) {
+      recordAction("rename_failed", {
+        panelId: current.panelId,
+        source: current.path,
+        newName: nextName,
+        error: errorToMessage(error),
+      });
       reportNotice(errorToMessage(error));
     }
-  }, [refreshPanel, renameState, reportNotice]);
+  }, [recordAction, refreshPanel, renameState, reportNotice]);
+
+  const cancelRename = useCallback(() => {
+    if (renameState) {
+      recordAction("rename_cancelled", {
+        path: renameState.path,
+        reason: "cancelled",
+      });
+    }
+    setRenameState(null);
+  }, [recordAction, renameState]);
 
   const createFolderInPanel = useCallback(async (panelId = activePanelId) => {
+    recordAction("create_folder_requested", { panelId });
     if (!session) {
       return;
     }
@@ -703,6 +855,12 @@ function App() {
 
     try {
       const path = await createFolder(tab.path, name);
+      recordAction("create_folder_completed", {
+        panelId,
+        parentDir: tab.path,
+        name,
+        path,
+      });
       setSession((previous) =>
         previous
           ? updateActiveTab(previous, panelId, (current) => ({
@@ -713,30 +871,44 @@ function App() {
       );
       await refreshPanel(panelId);
     } catch (error) {
+      recordAction("create_folder_failed", {
+        panelId,
+        parentDir: tab.path,
+        name,
+        error: errorToMessage(error),
+      });
       reportNotice(errorToMessage(error));
     }
-  }, [activePanelId, listings, refreshPanel, reportNotice, session]);
+  }, [activePanelId, listings, recordAction, refreshPanel, reportNotice, session]);
 
   const previewSelected = useCallback(async () => {
+    recordAction("preview_requested", { panelId: session?.activePanel ?? null });
     if (!session) {
       return;
     }
     const tab = activeTab(session[session.activePanel]);
     const entry = findSelectedEntry(tab, listings[tab.id] ?? null);
     if (!entry) {
+      recordAction("preview_blocked", { reason: "no_selection" });
       reportNotice("Select an item to preview.");
       return;
     }
 
     try {
       await previewPath(entry.path);
+      recordAction("preview_opened", { path: entry.path });
       reportNotice(null);
     } catch (error) {
+      recordAction("preview_failed", {
+        path: entry.path,
+        error: errorToMessage(error),
+      });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, reportNotice, session]);
+  }, [listings, recordAction, reportNotice, session]);
 
   const toggleHiddenFiles = useCallback(() => {
+    recordAction("toggle_hidden_files", { visible: !showHiddenFiles });
     setSession((previous) =>
       previous
         ? {
@@ -745,7 +917,7 @@ function App() {
           }
         : previous,
     );
-  }, []);
+  }, [recordAction, showHiddenFiles]);
 
   const shortcutHandlers = useMemo(
     () => ({
@@ -805,17 +977,36 @@ function App() {
       <header className="app-bar">
         <div className="brand">LittleCommander</div>
         <div className="global-actions">
-          <IconButton label="Copy to opposite panel" showLabel onClick={() => void runTransfer("copy")}>
+          <IconButton
+            disabled={!rightPanelVisible}
+            label="Copy to opposite panel"
+            showLabel
+            onClick={() => void runTransfer("copy")}
+          >
             <Copy size={16} />
           </IconButton>
-          <IconButton label="Move to opposite panel" showLabel onClick={() => void runTransfer("move")}>
+          <IconButton
+            disabled={!rightPanelVisible}
+            label="Move to opposite panel"
+            showLabel
+            onClick={() => void runTransfer("move")}
+          >
             <MoveRight size={16} />
           </IconButton>
           <IconButton
+            disabled={!rightPanelVisible}
             label={`Match opposite panel folder (${syncShortcut})`}
             onClick={syncActivePanelToOpposite}
           >
             <FolderSync size={16} />
+          </IconButton>
+          <IconButton
+            data-testid="toggle-right-panel"
+            label={rightPanelVisible ? "Hide right panel" : "Show right panel"}
+            className={rightPanelVisible ? "" : "pressed"}
+            onClick={toggleRightPanel}
+          >
+            {rightPanelVisible ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
           </IconButton>
           <IconButton label="Rename" onClick={() => void renameSelected()}>
             <Pencil size={16} />
@@ -846,14 +1037,20 @@ function App() {
         <div className="notice">
           <TriangleAlert size={16} />
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(null)}>
+          <button
+            type="button"
+            onClick={() => {
+              recordAction("dismiss_notice", { message: notice });
+              setNotice(null);
+            }}
+          >
             Dismiss
           </button>
         </div>
       ) : null}
 
       <div className="workspace">
-        <div className="panels">
+        <div className={`panels ${rightPanelVisible ? "" : "single-panel"}`}>
           <FilePanel
             panelId="left"
             panel={session.left}
@@ -876,32 +1073,34 @@ function App() {
               setRenameState((current) => (current ? { ...current, name } : current))
             }
             onRenameCommit={() => void commitRename()}
-            onRenameCancel={() => setRenameState(null)}
+            onRenameCancel={cancelRename}
           />
-          <FilePanel
-            panelId="right"
-            panel={session.right}
-            listing={listings[activeTab(session.right).id] ?? null}
-            loading={Boolean(loading[activeTab(session.right).id])}
-            isActive={session.activePanel === "right"}
-            onActivate={setActivePanel}
-            onSwitchTab={switchTab}
-            onNewTab={newTab}
-            onCloseTab={closeTab}
-            onGoParent={goParent}
-            onRefresh={refreshPanel}
-            onSelect={selectPath}
-            onOpenEntry={openEntry}
-            onEntryContextMenu={openEntryContextMenu}
-            onCreateFolder={createFolderInPanel}
-            renamingPath={renameState?.panelId === "right" ? renameState.path : null}
-            renamingName={renameState?.panelId === "right" ? renameState.name : ""}
-            onRenameChange={(name) =>
-              setRenameState((current) => (current ? { ...current, name } : current))
-            }
-            onRenameCommit={() => void commitRename()}
-            onRenameCancel={() => setRenameState(null)}
-          />
+          {rightPanelVisible ? (
+            <FilePanel
+              panelId="right"
+              panel={session.right}
+              listing={listings[activeTab(session.right).id] ?? null}
+              loading={Boolean(loading[activeTab(session.right).id])}
+              isActive={session.activePanel === "right"}
+              onActivate={setActivePanel}
+              onSwitchTab={switchTab}
+              onNewTab={newTab}
+              onCloseTab={closeTab}
+              onGoParent={goParent}
+              onRefresh={refreshPanel}
+              onSelect={selectPath}
+              onOpenEntry={openEntry}
+              onEntryContextMenu={openEntryContextMenu}
+              onCreateFolder={createFolderInPanel}
+              renamingPath={renameState?.panelId === "right" ? renameState.path : null}
+              renamingName={renameState?.panelId === "right" ? renameState.name : ""}
+              onRenameChange={(name) =>
+                setRenameState((current) => (current ? { ...current, name } : current))
+              }
+              onRenameCommit={() => void commitRename()}
+              onRenameCancel={cancelRename}
+            />
+          ) : null}
         </div>
       </div>
       {contextMenu ? (

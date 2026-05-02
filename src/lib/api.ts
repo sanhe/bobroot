@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ActionLogDetails,
   ConflictStrategy,
   DirectoryListing,
   OperationReport,
@@ -67,4 +68,11 @@ export async function loadSession(): Promise<SessionData | null> {
 
 export async function saveSession(session: SessionData): Promise<void> {
   return invoke("save_session", { session });
+}
+
+export async function logAction(
+  action: string,
+  details: ActionLogDetails = {},
+): Promise<void> {
+  return invoke("append_action_log", { action, details });
 }

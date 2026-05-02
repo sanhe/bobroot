@@ -108,6 +108,12 @@ button {
   background: #ffffff;
 }
 
+.icon-button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: #a9b0ba;
+}
+
 .icon-button:active,
 .icon-button.pressed {
   border-color: #9bb7dc;
@@ -156,6 +162,10 @@ button {
   gap: 12px;
   min-width: 0;
   min-height: 0;
+}
+
+.panels.single-panel {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .file-panel {

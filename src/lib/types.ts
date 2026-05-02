@@ -2,6 +2,8 @@ export type PanelId = "left" | "right";
 
 export type ConflictStrategy = "replace" | "skip" | "rename";
 
+export type ActionLogDetails = Record<string, unknown>;
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -56,6 +58,7 @@ export interface SessionData {
   left: PanelState;
   right: PanelState;
   activePanel: PanelId;
+  rightPanelVisible: boolean;
   showHiddenFiles: boolean;
   window: WindowSession | null;
 }

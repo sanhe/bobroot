@@ -12,6 +12,7 @@
         window.location.hostname === "127.0.0.1" ||
         window.location.hostname === "localhost";
       if (isLocalTestHost && new URLSearchParams(window.location.search).has("lc-test")) {
+        window.__LC_TEST_ACTIONS = [];
         const modified = Date.now();
         const directories = {
           "/mock/Downloads": [
@@ -53,6 +54,16 @@
               return null;
             }
             if (cmd === "save_session") {
+              return null;
+            }
+            if (cmd === "append_action_log") {
+              const entry = {
+                timestamp: Date.now(),
+                action: args.action,
+                details: args.details ?? {},
+              };
+              window.__LC_TEST_ACTIONS.push(entry);
+              console.log("LC_ACTION_LOG", JSON.stringify(entry));
               return null;
             }
             if (cmd.startsWith("plugin:window|")) {

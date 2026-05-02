@@ -49,10 +49,14 @@ export function normalizePanel(panel: PanelState, fallbackPath: string): PanelSt
 }
 
 export function normalizeSession(session: SessionData, fallbackPath: string): SessionData {
+  const rightPanelVisible = session.rightPanelVisible !== false;
+
   return {
     left: normalizePanel(session.left, fallbackPath),
     right: normalizePanel(session.right, fallbackPath),
-    activePanel: session.activePanel === "right" ? "right" : "left",
+    activePanel:
+      rightPanelVisible && session.activePanel === "right" ? "right" : "left",
+    rightPanelVisible,
     showHiddenFiles: Boolean(session.showHiddenFiles),
     window: session.window ?? null,
   };
