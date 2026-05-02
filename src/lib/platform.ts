@@ -50,6 +50,10 @@ export function syncPanelShortcut(platform = currentPlatform()): string {
   return platform === "macos" ? "Cmd+Option+S" : "Ctrl+Alt+S";
 }
 
+export function copyPathShortcut(platform = currentPlatform()): string {
+  return platform === "macos" ? "Cmd+Option+C" : "Ctrl+Shift+C";
+}
+
 export function newFolderShortcut(platform = currentPlatform()): string {
   return platform === "macos" ? "Cmd+Shift+N" : "Ctrl+Shift+N";
 }

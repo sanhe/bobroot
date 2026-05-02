@@ -9,6 +9,7 @@ interface ShortcutHandlers {
   newTab: () => void;
   closeTab: () => void;
   createFolder: () => void;
+  copySelectedPaths: () => void;
   copyToOpposite: () => void;
   moveToOpposite: () => void;
   syncActivePanelToOpposite: () => void;
@@ -41,6 +42,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       const lowerKey = key.toLowerCase();
       const isEnter = key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
       const isPeriod = key === "." || key === ">" || event.code === "Period";
+      const isKeyC = lowerKey === "c" || event.code === "KeyC";
       const isKeyN = lowerKey === "n" || event.code === "KeyN";
       const isKeyS = lowerKey === "s" || event.code === "KeyS";
 
@@ -83,6 +85,25 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
 
       const commandOrControl =
         platform === "macos" ? event.metaKey : event.ctrlKey;
+
+      const isCopyPathShortcut =
+        (platform === "macos" &&
+          event.metaKey &&
+          event.altKey &&
+          !event.shiftKey &&
+          isKeyC) ||
+        (platform !== "macos" &&
+          event.ctrlKey &&
+          event.shiftKey &&
+          !event.altKey &&
+          isKeyC);
+
+      if (isCopyPathShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.copySelectedPaths();
+        return;
+      }
 
       if (
         commandOrControl &&

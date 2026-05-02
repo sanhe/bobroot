@@ -39,6 +39,7 @@ import {
 } from "./lib/tabState";
 import {
   currentPlatform,
+  copyPathShortcut,
   hiddenFilesShortcut,
   newFolderShortcut,
   permanentDeleteShortcut,
@@ -89,6 +90,7 @@ function App() {
 
   const platform = useMemo(() => currentPlatform(), []);
   const hiddenShortcut = useMemo(() => hiddenFilesShortcut(platform), [platform]);
+  const copyPathKey = useMemo(() => copyPathShortcut(platform), [platform]);
   const folderShortcut = useMemo(() => newFolderShortcut(platform), [platform]);
   const syncShortcut = useMemo(() => syncPanelShortcut(platform), [platform]);
   const trashKey = useMemo(() => trashShortcut(platform), [platform]);
@@ -633,6 +635,45 @@ function App() {
     [recordAction, reportNotice],
   );
 
+  const copyPathsToClipboard = useCallback(
+    async (paths: string[], source: "selection" | "context_menu") => {
+      recordAction("copy_path_requested", { source, items: paths });
+      if (paths.length === 0) {
+        reportNotice("Select one or more items first.");
+        return;
+      }
+
+      try {
+        await writeClipboardText(paths.join("\n"));
+        recordAction("copy_path_completed", { source, items: paths });
+        reportNotice(
+          paths.length === 1
+            ? "Copied path to clipboard."
+            : `Copied ${paths.length} paths to clipboard.`,
+        );
+      } catch (error) {
+        recordAction("copy_path_failed", {
+          source,
+          items: paths,
+          error: errorToMessage(error),
+        });
+        reportNotice(errorToMessage(error));
+      }
+    },
+    [recordAction, reportNotice],
+  );
+
+  const copySelectedPaths = useCallback(() => {
+    if (!session) {
+      return;
+    }
+
+    const tab = activeTab(session[session.activePanel]);
+    const selectedPaths = visibleSelectedPaths(tab, listings[tab.id] ?? null);
+    setContextMenu(null);
+    void copyPathsToClipboard(selectedPaths, "selection");
+  }, [copyPathsToClipboard, listings, session]);
+
   const runTransfer = useCallback(
     async (mode: "copy" | "move") => {
       recordAction("transfer_requested", { mode });
@@ -928,6 +969,7 @@ function App() {
       newTab,
       closeTab,
       createFolder: () => void createFolderInPanel(),
+      copySelectedPaths,
       copyToOpposite: () => void runTransfer("copy"),
       moveToOpposite: () => void runTransfer("move"),
       syncActivePanelToOpposite,
@@ -944,6 +986,7 @@ function App() {
     [
       closeTab,
       createFolderInPanel,
+      copySelectedPaths,
       deleteSelectedPermanently,
       goParent,
       newTab,
@@ -1125,6 +1168,17 @@ function App() {
           <button type="button" role="menuitem" onClick={() => void revealEntry(contextMenu.entry)}>
             {revealLabel}
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const path = contextMenu.entry.path;
+              setContextMenu(null);
+              void copyPathsToClipboard([path], "context_menu");
+            }}
+          >
+            Copy Path ({copyPathKey})
+          </button>
         </div>
       ) : null}
     </main>
@@ -1193,6 +1247,34 @@ function visibleSelectedPaths(tab: TabState, listing: DirectoryListing | null): 
 
   const visiblePaths = new Set(listing.entries.map((entry) => entry.path));
   return tab.selectedPaths.filter((path) => visiblePaths.has(path));
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall through to the legacy copy path below.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard is unavailable.");
+    }
+  } finally {
+    textarea.remove();
+  }
 }
 
 function getActivePanelPageSize(): number {

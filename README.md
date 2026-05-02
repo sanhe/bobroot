@@ -21,6 +21,7 @@ Bobroot is a small cross-platform desktop file manager for macOS, Ubuntu, and Wi
 - Global hidden-files toggle
 - Select one or multiple items
 - Copy and move selected items to the opposite panel
+- Copy selected file and folder paths to the clipboard
 - Conflict handling: replace, skip, or rename with a suffix
 - Open files and folders with the default system application
 - Rename, create folder, move to Trash/Bin/Recycle Bin, and permanent delete with confirmation
@@ -118,6 +119,7 @@ Tauri writes release artifacts under `src-tauri/target/release/bundle`.
 - Rename selected item: `Enter` on macOS, `F2` on Linux and Windows
 - Go to parent folder: `Cmd+Up` on macOS, `Alt+Up` or `Backspace` on Linux and Windows
 - Open selected folder in a new tab: `Cmd+Enter` on macOS, `Ctrl+Enter` on Linux and Windows
+- Copy selected path(s): `Cmd+Option+C` on macOS, `Ctrl+Shift+C` on Linux and Windows
 - Create folder: `Cmd+Shift+N` on macOS, `Ctrl+Shift+N` on Linux and Windows
 - Switch active panel: `Tab`
 - Match active panel to the opposite panel folder: `Cmd+Option+S` on macOS, `Ctrl+Alt+S` on Linux and Windows
