@@ -322,6 +322,19 @@ button {
   white-space: nowrap;
 }
 
+.rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 1px 5px;
+  border: 1px solid #2f7dd1;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #1d1d1f;
+  font: inherit;
+  outline: none;
+}
+
 .file-size,
 .file-modified {
   color: #6f7783;

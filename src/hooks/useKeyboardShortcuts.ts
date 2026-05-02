@@ -8,8 +8,10 @@ interface ShortcutHandlers {
   switchPanel: () => void;
   newTab: () => void;
   closeTab: () => void;
+  createFolder: () => void;
   copyToOpposite: () => void;
   moveToOpposite: () => void;
+  syncActivePanelToOpposite: () => void;
   trashSelected: () => void;
   deleteSelectedPermanently: () => void;
   previewSelected: () => void;
@@ -37,7 +39,10 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       const platform = currentPlatform();
       const key = event.key;
       const lowerKey = key.toLowerCase();
+      const isEnter = key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
       const isPeriod = key === "." || key === ">" || event.code === "Period";
+      const isKeyN = lowerKey === "n" || event.code === "KeyN";
+      const isKeyS = lowerKey === "s" || event.code === "KeyS";
 
       if (platform === "macos" && event.metaKey && event.shiftKey && isPeriod) {
         event.preventDefault();
@@ -79,8 +84,20 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       const commandOrControl =
         platform === "macos" ? event.metaKey : event.ctrlKey;
 
-      if (commandOrControl && key === "Enter") {
+      if (
+        commandOrControl &&
+        event.altKey &&
+        !event.shiftKey &&
+        isKeyS
+      ) {
         event.preventDefault();
+        handlers.syncActivePanelToOpposite();
+        return;
+      }
+
+      if (commandOrControl && isEnter) {
+        event.preventDefault();
+        event.stopPropagation();
         handlers.openSelectedInNewTab();
         return;
       }
@@ -103,8 +120,9 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         return;
       }
 
-      if (key === "Enter") {
+      if (isEnter) {
         event.preventDefault();
+        event.stopPropagation();
         if (platform === "macos") {
           handlers.renameSelected();
         } else {
@@ -179,6 +197,12 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         return;
       }
 
+      if (commandOrControl && event.shiftKey && isKeyN) {
+        event.preventDefault();
+        handlers.createFolder();
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && lowerKey === "w") {
         event.preventDefault();
         handlers.closeTab();
@@ -209,7 +233,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       }
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [handlers]);
 }

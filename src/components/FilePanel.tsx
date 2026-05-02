@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef } from "react";
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { basename, displayPath, formatBytes, formatDate } from "../lib/format";
 import type { DirectoryListing, FileEntry, PanelId, PanelState } from "../lib/types";
 import { activeTab } from "../lib/tabState";
@@ -36,6 +36,11 @@ interface FilePanelProps {
     position: { x: number; y: number },
   ) => void;
   onCreateFolder: (panelId: PanelId) => void;
+  renamingPath: string | null;
+  renamingName: string;
+  onRenameChange: (name: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
 }
 
 export function FilePanel({
@@ -54,11 +59,16 @@ export function FilePanel({
   onOpenEntry,
   onEntryContextMenu,
   onCreateFolder,
+  renamingPath,
+  renamingName,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
 }: FilePanelProps) {
   const tab = activeTab(panel);
   const selected = new Set(tab.selectedPaths);
   const highlightedPath = tab.selectedPaths[0] ?? null;
-  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
     if (!isActive || !highlightedPath) {
@@ -144,6 +154,8 @@ export function FilePanel({
                     }
                   }}
                   selected={selected.has(entry.path)}
+                  isRenaming={entry.path === renamingPath}
+                  renamingName={renamingName}
                   onClick={(event) =>
                     onSelect(panelId, entry.path, event.metaKey || event.ctrlKey)
                   }
@@ -155,6 +167,9 @@ export function FilePanel({
                       y: event.clientY,
                     });
                   }}
+                  onRenameChange={onRenameChange}
+                  onRenameCommit={onRenameCommit}
+                  onRenameCancel={onRenameCancel}
                 />
               ))
             : null}
@@ -166,21 +181,32 @@ export function FilePanel({
 
 interface FileRowProps {
   entry: FileEntry;
-  rowRef: (element: HTMLButtonElement | null) => void;
+  rowRef: (element: HTMLDivElement | null) => void;
   selected: boolean;
-  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  isRenaming: boolean;
+  renamingName: string;
+  onClick: (event: MouseEvent<HTMLDivElement>) => void;
   onDoubleClick: () => void;
-  onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
+  onContextMenu: (event: MouseEvent<HTMLDivElement>) => void;
+  onRenameChange: (name: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
 }
 
 function FileRow({
   entry,
   rowRef,
   selected,
+  isRenaming,
+  renamingName,
   onClick,
   onDoubleClick,
   onContextMenu,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
 }: FileRowProps) {
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const icon = entry.isDir ? (
     <Folder size={17} />
   ) : entry.extension === "pdf" ? (
@@ -189,23 +215,61 @@ function FileRow({
     <File size={17} />
   );
 
+  useEffect(() => {
+    if (!isRenaming) {
+      return;
+    }
+
+    const input = renameInputRef.current;
+    input?.focus();
+    input?.select();
+  }, [isRenaming]);
+
+  const onRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onRenameCommit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onRenameCancel();
+    }
+  };
+
   return (
-    <button
+    <div
       className={`file-row ${selected ? "selected" : ""}`}
       ref={rowRef}
       aria-selected={selected}
+      data-file-name={entry.name}
+      data-testid="file-row"
       onClick={onClick}
       onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
       role="row"
-      type="button"
     >
       <div className="file-name">
         <span className={`file-icon ${entry.isDir ? "folder" : ""}`}>{icon}</span>
-        <span className="name-text">{entry.name}</span>
+        {isRenaming ? (
+          <input
+            aria-label="Rename item"
+            className="rename-input"
+            data-testid="rename-input"
+            onBlur={onRenameCancel}
+            onChange={(event) => onRenameChange(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={onRenameKeyDown}
+            onMouseDown={(event) => event.stopPropagation()}
+            ref={renameInputRef}
+            value={renamingName}
+          />
+        ) : (
+          <span className="name-text">{entry.name}</span>
+        )}
       </div>
       <div className="file-size">{entry.isDir ? "--" : formatBytes(entry.size)}</div>
       <div className="file-modified">{formatDate(entry.modified)}</div>
-    </button>
+    </div>
   );
 }

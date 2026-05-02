@@ -4,6 +4,7 @@ import {
   Eye,
   EyeOff,
   FolderPlus,
+  FolderSync,
   MoveRight,
   Pencil,
   Trash2,
@@ -36,8 +37,10 @@ import {
 import {
   currentPlatform,
   hiddenFilesShortcut,
+  newFolderShortcut,
   permanentDeleteShortcut,
   revealActionLabel,
+  syncPanelShortcut,
   trashShortcut,
   trashTargetName,
 } from "./lib/platform";
@@ -65,16 +68,25 @@ interface ContextMenuState {
   y: number;
 }
 
+interface RenameState {
+  panelId: PanelId;
+  path: string;
+  name: string;
+}
+
 function App() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [listings, setListings] = useState<ListingMap>({});
   const [loading, setLoading] = useState<LoadingMap>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [renameState, setRenameState] = useState<RenameState | null>(null);
   const saveTimer = useRef<number | null>(null);
 
   const platform = useMemo(() => currentPlatform(), []);
   const hiddenShortcut = useMemo(() => hiddenFilesShortcut(platform), [platform]);
+  const folderShortcut = useMemo(() => newFolderShortcut(platform), [platform]);
+  const syncShortcut = useMemo(() => syncPanelShortcut(platform), [platform]);
   const trashKey = useMemo(() => trashShortcut(platform), [platform]);
   const trashName = useMemo(() => trashTargetName(platform), [platform]);
   const permanentShortcut = useMemo(() => permanentDeleteShortcut(platform), [platform]);
@@ -343,6 +355,21 @@ function App() {
       navigateTo(panelId, listing.parent);
     }
   }, [activePanelId, listings, navigateTo, session]);
+
+  const syncActivePanelToOpposite = useCallback(() => {
+    if (!session) {
+      return;
+    }
+
+    const panelId = session.activePanel;
+    const sourcePanelId = oppositePanel(panelId);
+    const currentTab = activeTab(session[panelId]);
+    const sourceTab = activeTab(session[sourcePanelId]);
+
+    if (currentTab.path !== sourceTab.path) {
+      navigateTo(panelId, sourceTab.path);
+    }
+  }, [navigateTo, session]);
 
   const selectPath = useCallback(
     (panelId: PanelId, path: string, additive: boolean) => {
@@ -618,39 +645,53 @@ function App() {
     }
   }, [listings, refreshPanel, reportNotice, session]);
 
-  const renameSelected = useCallback(async () => {
+  const renameSelected = useCallback(() => {
     if (!session) {
       return;
     }
     const panelId = session.activePanel;
     const tab = activeTab(session[panelId]);
-    const selectedPaths = visibleSelectedPaths(tab, listings[tab.id] ?? null);
-    if (selectedPaths.length !== 1) {
+    const listing = listings[tab.id] ?? null;
+    const selectedPaths = visibleSelectedPaths(tab, listing);
+    const entry = findSelectedEntry(tab, listing);
+    if (selectedPaths.length !== 1 || !entry) {
       reportNotice("Select exactly one item to rename.");
       return;
     }
 
-    const currentName = basename(selectedPaths[0]);
-    const nextName = window.prompt("Rename item", currentName);
-    if (!nextName || nextName === currentName) {
+    setRenameState({ panelId, path: entry.path, name: entry.name });
+    reportNotice(null);
+  }, [listings, reportNotice, session]);
+
+  const commitRename = useCallback(async () => {
+    if (!renameState) {
+      return;
+    }
+
+    const current = renameState;
+    const nextName = current.name.trim();
+    setRenameState(null);
+
+    if (!nextName || nextName === basename(current.path)) {
       return;
     }
 
     try {
-      const nextPath = await renameItem(selectedPaths[0], nextName);
+      const nextPath = await renameItem(current.path, nextName);
       setSession((previous) =>
         previous
-          ? updateActiveTab(previous, panelId, (current) => ({
-              ...current,
+          ? updateActiveTab(previous, current.panelId, (tab) => ({
+              ...tab,
               selectedPaths: [nextPath],
             }))
           : previous,
       );
-      await refreshPanel(panelId);
+      reportNotice(null);
+      await refreshPanel(current.panelId);
     } catch (error) {
       reportNotice(errorToMessage(error));
     }
-  }, [listings, refreshPanel, reportNotice, session]);
+  }, [refreshPanel, renameState, reportNotice]);
 
   const createFolderInPanel = useCallback(async (panelId = activePanelId) => {
     if (!session) {
@@ -658,10 +699,7 @@ function App() {
     }
 
     const tab = activeTab(session[panelId]);
-    const name = window.prompt("New folder name", "New Folder");
-    if (!name) {
-      return;
-    }
+    const name = nextNewFolderName(listings[tab.id]?.entries ?? []);
 
     try {
       const path = await createFolder(tab.path, name);
@@ -677,7 +715,7 @@ function App() {
     } catch (error) {
       reportNotice(errorToMessage(error));
     }
-  }, [activePanelId, refreshPanel, reportNotice, session]);
+  }, [activePanelId, listings, refreshPanel, reportNotice, session]);
 
   const previewSelected = useCallback(async () => {
     if (!session) {
@@ -717,8 +755,10 @@ function App() {
       switchPanel,
       newTab,
       closeTab,
+      createFolder: () => void createFolderInPanel(),
       copyToOpposite: () => void runTransfer("copy"),
       moveToOpposite: () => void runTransfer("move"),
+      syncActivePanelToOpposite,
       trashSelected: () => void trashSelected(),
       deleteSelectedPermanently: () => void deleteSelectedPermanently(),
       previewSelected: () => void previewSelected(),
@@ -731,6 +771,7 @@ function App() {
     }),
     [
       closeTab,
+      createFolderInPanel,
       deleteSelectedPermanently,
       goParent,
       newTab,
@@ -743,6 +784,7 @@ function App() {
       moveSelectionPage,
       selectFirstRow,
       selectLastRow,
+      syncActivePanelToOpposite,
       switchPanel,
       toggleHiddenFiles,
       trashSelected,
@@ -769,10 +811,16 @@ function App() {
           <IconButton label="Move to opposite panel" showLabel onClick={() => void runTransfer("move")}>
             <MoveRight size={16} />
           </IconButton>
+          <IconButton
+            label={`Match opposite panel folder (${syncShortcut})`}
+            onClick={syncActivePanelToOpposite}
+          >
+            <FolderSync size={16} />
+          </IconButton>
           <IconButton label="Rename" onClick={() => void renameSelected()}>
             <Pencil size={16} />
           </IconButton>
-          <IconButton label="New folder" onClick={() => void createFolderInPanel()}>
+          <IconButton label={`New folder (${folderShortcut})`} onClick={() => void createFolderInPanel()}>
             <FolderPlus size={16} />
           </IconButton>
           <IconButton
@@ -822,6 +870,13 @@ function App() {
             onOpenEntry={openEntry}
             onEntryContextMenu={openEntryContextMenu}
             onCreateFolder={createFolderInPanel}
+            renamingPath={renameState?.panelId === "left" ? renameState.path : null}
+            renamingName={renameState?.panelId === "left" ? renameState.name : ""}
+            onRenameChange={(name) =>
+              setRenameState((current) => (current ? { ...current, name } : current))
+            }
+            onRenameCommit={() => void commitRename()}
+            onRenameCancel={() => setRenameState(null)}
           />
           <FilePanel
             panelId="right"
@@ -839,6 +894,13 @@ function App() {
             onOpenEntry={openEntry}
             onEntryContextMenu={openEntryContextMenu}
             onCreateFolder={createFolderInPanel}
+            renamingPath={renameState?.panelId === "right" ? renameState.path : null}
+            renamingName={renameState?.panelId === "right" ? renameState.name : ""}
+            onRenameChange={(name) =>
+              setRenameState((current) => (current ? { ...current, name } : current))
+            }
+            onRenameCommit={() => void commitRename()}
+            onRenameCancel={() => setRenameState(null)}
           />
         </div>
       </div>
@@ -966,6 +1028,22 @@ function askConflictStrategy(mode: "copy" | "move"): ConflictStrategy | null {
 
   window.alert("Use replace, skip, or rename.");
   return null;
+}
+
+function nextNewFolderName(entries: FileEntry[]): string {
+  const names = new Set(entries.map((entry) => entry.name));
+  const baseName = "New Folder";
+
+  if (!names.has(baseName)) {
+    return baseName;
+  }
+
+  for (let index = 2; ; index += 1) {
+    const name = `${baseName} ${index}`;
+    if (!names.has(name)) {
+      return name;
+    }
+  }
 }
 
 function describeReport(results: Array<{ status: string; message: string | null }>): string {

@@ -7,6 +7,104 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      const isLocalTestHost =
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname === "localhost";
+      if (isLocalTestHost && new URLSearchParams(window.location.search).has("lc-test")) {
+        const modified = Date.now();
+        const directories = {
+          "/mock/Downloads": [
+            { name: "Alpha", isDir: true },
+            { name: "notes.txt", isDir: false, size: 1024 },
+          ],
+          "/mock/Downloads/Alpha": [],
+        };
+
+        const entryPath = (parent, name) => `${parent}/${name}`;
+        const fileEntry = (parent, entry) => ({
+          name: entry.name,
+          path: entryPath(parent, entry.name),
+          isDir: entry.isDir,
+          isFile: !entry.isDir,
+          isSymlink: false,
+          isHidden: false,
+          size: entry.isDir ? null : entry.size ?? 0,
+          modified,
+          extension: entry.name.includes(".") ? entry.name.split(".").pop().toLowerCase() : null,
+        });
+        const parentPath = (path) => {
+          if (path === "/mock") {
+            return null;
+          }
+          const index = path.lastIndexOf("/");
+          return index > 0 ? path.slice(0, index) : null;
+        };
+
+        window.__TAURI_INTERNALS__ = {
+          metadata: { currentWindow: { label: "main" } },
+          transformCallback: () => Math.floor(Math.random() * 1000000),
+          unregisterCallback: () => {},
+          invoke: async (cmd, args = {}) => {
+            if (cmd === "home_dir") {
+              return "/mock/Downloads";
+            }
+            if (cmd === "load_session") {
+              return null;
+            }
+            if (cmd === "save_session") {
+              return null;
+            }
+            if (cmd.startsWith("plugin:window|")) {
+              return null;
+            }
+            if (cmd === "list_directory") {
+              const entries = directories[args.path];
+              if (!entries) {
+                throw { message: `'${args.path}' is not a folder` };
+              }
+              return {
+                path: args.path,
+                parent: parentPath(args.path),
+                showHiddenFiles: Boolean(args.showHiddenFiles),
+                entries: entries.map((entry) => fileEntry(args.path, entry)),
+              };
+            }
+            if (cmd === "create_folder") {
+              const entries = directories[args.parentDir];
+              if (!entries) {
+                throw { message: `'${args.parentDir}' is not a folder` };
+              }
+              if (entries.some((entry) => entry.name === args.name)) {
+                throw { message: `'${args.name}' already exists` };
+              }
+              entries.push({ name: args.name, isDir: true });
+              directories[entryPath(args.parentDir, args.name)] = [];
+              return entryPath(args.parentDir, args.name);
+            }
+            if (cmd === "rename_item") {
+              const parent = parentPath(args.path);
+              const entries = directories[parent] ?? [];
+              const entry = entries.find((item) => entryPath(parent, item.name) === args.path);
+              if (!entry) {
+                throw { message: `'${args.path}' does not exist` };
+              }
+              if (entries.some((item) => item.name === args.newName)) {
+                throw { message: `'${args.newName}' already exists` };
+              }
+              const oldPath = entryPath(parent, entry.name);
+              entry.name = args.newName;
+              if (entry.isDir) {
+                directories[entryPath(parent, args.newName)] = directories[oldPath] ?? [];
+                delete directories[oldPath];
+              }
+              return entryPath(parent, args.newName);
+            }
+            return null;
+          },
+        };
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -116,7 +116,9 @@ Tauri writes release artifacts under `src-tauri/target/release/bundle`.
 - Rename selected item: `Enter` on macOS, `F2` on Linux and Windows
 - Go to parent folder: `Cmd+Up` on macOS, `Alt+Up` or `Backspace` on Linux and Windows
 - Open selected folder in a new tab: `Cmd+Enter` on macOS, `Ctrl+Enter` on Linux and Windows
+- Create folder: `Cmd+Shift+N` on macOS, `Ctrl+Shift+N` on Linux and Windows
 - Switch active panel: `Tab`
+- Match active panel to the opposite panel folder: `Cmd+Option+S` on macOS, `Ctrl+Alt+S` on Linux and Windows
 - Move to Trash/Bin/Recycle Bin: `Cmd+Delete` on macOS, `Delete` on Linux and Windows
 - Permanent delete: `Option+Cmd+Delete` on macOS, `Ctrl+Delete` on Linux, `Shift+Delete` on Windows
 

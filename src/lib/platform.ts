@@ -6,11 +6,13 @@ export function currentPlatform(): AppPlatform {
       ? (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
           ?.platform
       : undefined;
-  const platform =
-    userAgentDataPlatform ??
-    navigator.platform ??
-    navigator.userAgent ??
-    "";
+  const platform = [
+    userAgentDataPlatform,
+    navigator.platform,
+    navigator.userAgent,
+  ]
+    .filter(Boolean)
+    .join(" ");
   const normalized = platform.toLowerCase();
 
   if (normalized.includes("mac")) {
@@ -42,6 +44,14 @@ export function permanentDeleteShortcut(platform = currentPlatform()): string {
 
 export function trashShortcut(platform = currentPlatform()): string {
   return platform === "macos" ? "Cmd+Delete" : "Delete";
+}
+
+export function syncPanelShortcut(platform = currentPlatform()): string {
+  return platform === "macos" ? "Cmd+Option+S" : "Ctrl+Alt+S";
+}
+
+export function newFolderShortcut(platform = currentPlatform()): string {
+  return platform === "macos" ? "Cmd+Shift+N" : "Ctrl+Shift+N";
 }
 
 export function trashTargetName(platform = currentPlatform()): string {
