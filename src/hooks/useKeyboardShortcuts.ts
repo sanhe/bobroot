@@ -41,6 +41,9 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       const key = event.key;
       const lowerKey = key.toLowerCase();
       const isEnter = key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
+      const isBackspace = isBackspaceKey(event);
+      const isForwardDelete = isForwardDeleteKey(event);
+      const isAnyDelete = isBackspace || isForwardDelete;
       const isPeriod = key === "." || key === ">" || event.code === "Period";
       const isKeyC = lowerKey === "c" || event.code === "KeyC";
       const isKeyN = lowerKey === "n" || event.code === "KeyN";
@@ -62,9 +65,9 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         (platform === "macos" &&
           event.metaKey &&
           event.altKey &&
-          (key === "Backspace" || key === "Delete")) ||
-        (platform === "linux" && event.ctrlKey && key === "Delete") ||
-        (platform === "windows" && event.shiftKey && key === "Delete");
+          isAnyDelete) ||
+        (platform === "linux" && event.ctrlKey && isForwardDelete) ||
+        (platform === "windows" && event.shiftKey && isForwardDelete);
 
       if (isPermanentDelete) {
         event.preventDefault();
@@ -76,7 +79,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         platform === "macos" &&
         event.metaKey &&
         !event.altKey &&
-        (key === "Backspace" || key === "Delete")
+        isAnyDelete
       ) {
         event.preventDefault();
         handlers.trashSelected();
@@ -89,7 +92,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         !event.ctrlKey &&
         !event.altKey &&
         !event.shiftKey &&
-        (key === "Backspace" || key === "Delete")
+        isAnyDelete
       ) {
         event.preventDefault();
         handlers.trashSelected();
@@ -209,7 +212,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
 
       if (
         platform !== "macos" &&
-        key === "Backspace" &&
+        isBackspace &&
         !event.metaKey &&
         !event.ctrlKey &&
         !event.altKey
@@ -255,7 +258,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         return;
       }
 
-      if (platform !== "macos" && key === "Delete") {
+      if (platform !== "macos" && isForwardDelete) {
         event.preventDefault();
         handlers.trashSelected();
         return;
@@ -270,4 +273,18 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [handlers]);
+}
+
+function isBackspaceKey(event: KeyboardEvent): boolean {
+  return event.key === "Backspace" || event.code === "Backspace";
+}
+
+function isForwardDeleteKey(event: KeyboardEvent): boolean {
+  return (
+    event.key === "Delete" ||
+    event.key === "Del" ||
+    event.key === "ForwardDelete" ||
+    event.code === "Delete" ||
+    event.code === "NumpadDelete"
+  );
 }
