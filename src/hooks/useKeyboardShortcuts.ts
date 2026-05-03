@@ -83,6 +83,19 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         return;
       }
 
+      if (
+        platform === "macos" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        (key === "Backspace" || key === "Delete")
+      ) {
+        event.preventDefault();
+        handlers.trashSelected();
+        return;
+      }
+
       const commandOrControl =
         platform === "macos" ? event.metaKey : event.ctrlKey;
 

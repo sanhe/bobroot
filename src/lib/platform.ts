@@ -43,7 +43,7 @@ export function permanentDeleteShortcut(platform = currentPlatform()): string {
 }
 
 export function trashShortcut(platform = currentPlatform()): string {
-  return platform === "macos" ? "Cmd+Delete" : "Delete";
+  return platform === "macos" ? "Delete or Cmd+Delete" : "Delete";
 }
 
 export function syncPanelShortcut(platform = currentPlatform()): string {
