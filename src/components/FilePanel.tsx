@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef } from "react";
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 import { basename, displayPath, formatBytes, formatDate } from "../lib/format";
 import type { DirectoryListing, FileEntry, PanelId, PanelState } from "../lib/types";
 import { activeTab } from "../lib/tabState";
@@ -30,6 +30,11 @@ interface FilePanelProps {
   onRefresh: (panelId: PanelId) => void;
   onSelect: (panelId: PanelId, path: string, additive: boolean) => void;
   onOpenEntry: (panelId: PanelId, entry: FileEntry) => void;
+  onEntryDragStart: (
+    panelId: PanelId,
+    entry: FileEntry,
+    event: DragEvent<HTMLDivElement>,
+  ) => void;
   onEntryContextMenu: (
     panelId: PanelId,
     entry: FileEntry,
@@ -57,6 +62,7 @@ export function FilePanel({
   onRefresh,
   onSelect,
   onOpenEntry,
+  onEntryDragStart,
   onEntryContextMenu,
   onCreateFolder,
   renamingPath,
@@ -160,6 +166,7 @@ export function FilePanel({
                     onSelect(panelId, entry.path, event.metaKey || event.ctrlKey)
                   }
                   onDoubleClick={() => onOpenEntry(panelId, entry)}
+                  onDragStart={(event) => onEntryDragStart(panelId, entry, event)}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     onEntryContextMenu(panelId, entry, {
@@ -187,6 +194,7 @@ interface FileRowProps {
   renamingName: string;
   onClick: (event: MouseEvent<HTMLDivElement>) => void;
   onDoubleClick: () => void;
+  onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>) => void;
   onRenameChange: (name: string) => void;
   onRenameCommit: () => void;
@@ -201,6 +209,7 @@ function FileRow({
   renamingName,
   onClick,
   onDoubleClick,
+  onDragStart,
   onContextMenu,
   onRenameChange,
   onRenameCommit,
@@ -244,9 +253,11 @@ function FileRow({
       aria-selected={selected}
       data-file-name={entry.name}
       data-testid="file-row"
+      draggable={!isRenaming}
       onClick={onClick}
       onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
+      onDragStart={onDragStart}
       role="row"
     >
       <div className="file-name">

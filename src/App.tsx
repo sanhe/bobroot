@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import {
   Copy,
   Eye,
@@ -674,6 +675,51 @@ function App() {
     void copyPathsToClipboard(selectedPaths, "selection");
   }, [copyPathsToClipboard, listings, session]);
 
+  const startPathDrag = useCallback(
+    (panelId: PanelId, entry: FileEntry, event: DragEvent<HTMLDivElement>) => {
+      const modifierHeld = platform === "macos" ? event.metaKey : event.ctrlKey;
+      if (!modifierHeld) {
+        event.preventDefault();
+        return;
+      }
+
+      if (!session) {
+        event.preventDefault();
+        return;
+      }
+
+      const tab = activeTab(session[panelId]);
+      const selectedPaths = tab.selectedPaths.includes(entry.path)
+        ? visibleSelectedPaths(tab, listings[tab.id] ?? null)
+        : [];
+      const dragPaths = selectedPaths.length > 0 ? selectedPaths : [entry.path];
+      const terminalText = formatPathsForTerminal(dragPaths, platform);
+      const uriList = dragPaths.map(pathToFileUri).join("\r\n");
+
+      event.stopPropagation();
+      event.dataTransfer.clearData();
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.dropEffect = "copy";
+      event.dataTransfer.setData("text/plain", terminalText);
+      event.dataTransfer.setData("text/uri-list", uriList);
+      event.dataTransfer.setData("application/x-bobroot-paths", JSON.stringify(dragPaths));
+
+      recordAction("path_drag_started", { panelId, items: dragPaths });
+      setContextMenu(null);
+      setRenameState(null);
+      setSession((previous) =>
+        previous
+          ? updateActiveTab({ ...previous, activePanel: panelId }, panelId, (current) =>
+              current.selectedPaths.includes(entry.path)
+                ? current
+                : { ...current, selectedPaths: [entry.path] },
+            )
+          : previous,
+      );
+    },
+    [listings, platform, recordAction, session],
+  );
+
   const runTransfer = useCallback(
     async (mode: "copy" | "move") => {
       recordAction("transfer_requested", { mode });
@@ -1108,6 +1154,7 @@ function App() {
             onRefresh={refreshPanel}
             onSelect={selectPath}
             onOpenEntry={openEntry}
+            onEntryDragStart={startPathDrag}
             onEntryContextMenu={openEntryContextMenu}
             onCreateFolder={createFolderInPanel}
             renamingPath={renameState?.panelId === "left" ? renameState.path : null}
@@ -1133,6 +1180,7 @@ function App() {
               onRefresh={refreshPanel}
               onSelect={selectPath}
               onOpenEntry={openEntry}
+              onEntryDragStart={startPathDrag}
               onEntryContextMenu={openEntryContextMenu}
               onCreateFolder={createFolderInPanel}
               renamingPath={renameState?.panelId === "right" ? renameState.path : null}
@@ -1247,6 +1295,52 @@ function visibleSelectedPaths(tab: TabState, listing: DirectoryListing | null): 
 
   const visiblePaths = new Set(listing.entries.map((entry) => entry.path));
   return tab.selectedPaths.filter((path) => visiblePaths.has(path));
+}
+
+function formatPathsForTerminal(paths: string[], platform: ReturnType<typeof currentPlatform>): string {
+  const formatter = platform === "windows" ? quoteWindowsPath : quotePosixPath;
+  return paths.map(formatter).join(" ");
+}
+
+function quotePosixPath(path: string): string {
+  if (path === "") {
+    return "''";
+  }
+
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(path)) {
+    return path;
+  }
+
+  return "'" + path.replace(/'/g, "'\\''") + "'";
+}
+
+function quoteWindowsPath(path: string): string {
+  if (path === "") {
+    return '""';
+  }
+
+  if (/^[A-Za-z0-9_.:\\/-]+$/.test(path)) {
+    return path;
+  }
+
+  return '"' + path.replace(/"/g, '""') + '"';
+}
+
+function pathToFileUri(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const prefix = normalized.startsWith("/") ? "file://" : "file:///";
+  const encodedPath = normalized
+    .split("/")
+    .map((segment, index) => {
+      if (segment === "" || (index === 0 && /^[A-Za-z]:$/.test(segment))) {
+        return segment;
+      }
+
+      return encodeURIComponent(segment);
+    })
+    .join("/");
+
+  return `${prefix}${encodedPath}`;
 }
 
 async function writeClipboardText(text: string): Promise<void> {
