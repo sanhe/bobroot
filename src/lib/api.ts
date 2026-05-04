@@ -5,6 +5,7 @@ import type {
   DirectoryListing,
   OperationReport,
   SessionData,
+  TerminalCommandResult,
 } from "./types";
 
 export async function getHomeDir(): Promise<string> {
@@ -60,6 +61,20 @@ export async function renameItem(path: string, newName: string): Promise<string>
 
 export async function createFolder(parentDir: string, name: string): Promise<string> {
   return invoke("create_folder", { parentDir, name });
+}
+
+export async function runTerminalCommand(
+  command: string,
+  cwd: string,
+): Promise<TerminalCommandResult> {
+  return invoke("run_terminal_command", { command, cwd });
+}
+
+export async function resolveTerminalDirectory(
+  cwd: string,
+  target: string,
+): Promise<string> {
+  return invoke("resolve_terminal_directory", { cwd, target });
 }
 
 export async function loadSession(): Promise<SessionData | null> {

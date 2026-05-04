@@ -34,6 +34,15 @@ export interface OperationReport {
   results: OperationItemResult[];
 }
 
+export interface TerminalCommandResult {
+  cwd: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+  status: number | null;
+  durationMs: number;
+}
+
 export interface TabState {
   id: string;
   path: string;
@@ -59,6 +68,9 @@ export interface SessionData {
   right: PanelState;
   activePanel: PanelId;
   rightPanelVisible: boolean;
+  panelSplit: number;
+  terminalVisible: boolean;
+  terminalHeight: number;
   showHiddenFiles: boolean;
   window: WindowSession | null;
 }

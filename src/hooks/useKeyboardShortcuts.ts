@@ -17,6 +17,7 @@ interface ShortcutHandlers {
   deleteSelectedPermanently: () => void;
   previewSelected: () => void;
   toggleHiddenFiles: () => void;
+  toggleTerminal: () => void;
   moveSelection: (delta: number) => void;
   moveSelectionPage: (direction: 1 | -1) => void;
   selectFirstRow: () => void;
@@ -48,6 +49,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       const isKeyC = lowerKey === "c" || event.code === "KeyC";
       const isKeyN = lowerKey === "n" || event.code === "KeyN";
       const isKeyS = lowerKey === "s" || event.code === "KeyS";
+      const isBackquote = key === "`" || event.code === "Backquote";
 
       if (platform === "macos" && event.metaKey && event.shiftKey && isPeriod) {
         event.preventDefault();
@@ -136,6 +138,13 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
         event.preventDefault();
         event.stopPropagation();
         handlers.openSelectedInNewTab();
+        return;
+      }
+
+      if (commandOrControl && !event.shiftKey && !event.altKey && isBackquote) {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.toggleTerminal();
         return;
       }
 

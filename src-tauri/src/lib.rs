@@ -5,7 +5,7 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 type CommandResult<T> = Result<T, CommandError>;
@@ -88,6 +88,9 @@ struct SessionData {
     right: PanelSession,
     active_panel: Option<String>,
     right_panel_visible: Option<bool>,
+    panel_split: Option<f64>,
+    terminal_visible: Option<bool>,
+    terminal_height: Option<u32>,
     show_hidden_files: Option<bool>,
     window: Option<WindowSession>,
 }
@@ -133,6 +136,17 @@ struct ActionLogLine {
     timestamp: u64,
     action: String,
     details: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalCommandResult {
+    cwd: String,
+    command: String,
+    stdout: String,
+    stderr: String,
+    status: Option<i32>,
+    duration_ms: u64,
 }
 
 #[tauri::command]
@@ -402,6 +416,53 @@ fn create_folder(parent_dir: String, name: String) -> CommandResult<String> {
 
     fs::create_dir(&destination)?;
     Ok(path_to_string(destination))
+}
+
+#[tauri::command]
+fn run_terminal_command(command: String, cwd: String) -> CommandResult<TerminalCommandResult> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err(CommandError::new("invalid_command", "Command is required"));
+    }
+
+    let working_dir = resolve_existing_directory(&cwd)?;
+    let started = Instant::now();
+    let output = terminal_shell_command(command)
+        .current_dir(&working_dir)
+        .output()
+        .map_err(|error| {
+            CommandError::new(
+                error.kind().to_string(),
+                format!(
+                    "Could not run command in '{}': {}",
+                    working_dir.display(),
+                    error
+                ),
+            )
+        })?;
+
+    Ok(TerminalCommandResult {
+        cwd: path_to_string(working_dir),
+        command: command.to_string(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        status: output.status.code(),
+        duration_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+#[tauri::command]
+fn resolve_terminal_directory(cwd: String, target: String) -> CommandResult<String> {
+    let working_dir = resolve_existing_directory(&cwd)?;
+    let target = target.trim();
+    let next_dir = if target.is_empty() {
+        dirs_next::home_dir()
+            .ok_or_else(|| CommandError::new("not_found", "Could not determine home directory"))?
+    } else {
+        expand_terminal_path(target, &working_dir)?
+    };
+
+    Ok(path_to_string(resolve_existing_directory_path(&next_dir)?))
 }
 
 #[tauri::command]
@@ -744,6 +805,75 @@ fn ensure_directory(path: &Path) -> CommandResult<()> {
     }
 }
 
+fn resolve_existing_directory(path: &str) -> CommandResult<PathBuf> {
+    if path.trim().is_empty() {
+        let home = dirs_next::home_dir()
+            .ok_or_else(|| CommandError::new("not_found", "Could not determine home directory"))?;
+        return resolve_existing_directory_path(&home);
+    }
+
+    resolve_existing_directory_path(&PathBuf::from(path))
+}
+
+fn resolve_existing_directory_path(path: &Path) -> CommandResult<PathBuf> {
+    let canonical = path.canonicalize().map_err(|error| {
+        CommandError::new(
+            error.kind().to_string(),
+            format!("Cannot open '{}': {}", path.display(), error),
+        )
+    })?;
+    ensure_directory(&canonical)?;
+    Ok(canonical)
+}
+
+fn expand_terminal_path(target: &str, cwd: &Path) -> CommandResult<PathBuf> {
+    if target == "~" {
+        return dirs_next::home_dir()
+            .ok_or_else(|| CommandError::new("not_found", "Could not determine home directory"));
+    }
+
+    if let Some(rest) = target
+        .strip_prefix("~/")
+        .or_else(|| target.strip_prefix("~\\"))
+    {
+        let home = dirs_next::home_dir()
+            .ok_or_else(|| CommandError::new("not_found", "Could not determine home directory"))?;
+        return Ok(home.join(rest));
+    }
+
+    let path = PathBuf::from(target);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(cwd.join(path))
+    }
+}
+
+#[cfg(windows)]
+fn terminal_shell_command(command: &str) -> Command {
+    let shell = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
+    let mut process = Command::new(shell);
+    process.arg("/C").arg(command);
+    process
+}
+
+#[cfg(not(windows))]
+fn terminal_shell_command(command: &str) -> Command {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let shell_name = Path::new(&shell)
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or_default();
+    let mut process = Command::new(&shell);
+    if matches!(shell_name, "bash" | "zsh" | "ksh") {
+        process.arg("-lc");
+    } else {
+        process.arg("-c");
+    }
+    process.arg(command);
+    process
+}
+
 fn prevent_copy_into_self(source: &Path, target: &Path) -> CommandResult<()> {
     let source = source.canonicalize()?;
     let target_parent = target
@@ -809,6 +939,8 @@ pub fn run() {
             reveal_path,
             rename_item,
             create_folder,
+            run_terminal_command,
+            resolve_terminal_directory,
             load_session,
             save_session,
             append_action_log

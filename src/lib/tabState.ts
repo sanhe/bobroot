@@ -2,6 +2,13 @@ import type { PanelId, PanelState, SessionData, TabState } from "./types";
 
 let nextId = 1;
 
+export const DEFAULT_TERMINAL_HEIGHT = 240;
+export const MIN_TERMINAL_HEIGHT = 168;
+export const MAX_TERMINAL_HEIGHT = 520;
+export const DEFAULT_PANEL_SPLIT = 0.5;
+export const MIN_PANEL_SPLIT = 0.24;
+export const MAX_PANEL_SPLIT = 0.76;
+
 export function createTab(path: string): TabState {
   return {
     id: `tab-${Date.now()}-${nextId++}`,
@@ -57,9 +64,41 @@ export function normalizeSession(session: SessionData, fallbackPath: string): Se
     activePanel:
       rightPanelVisible && session.activePanel === "right" ? "right" : "left",
     rightPanelVisible,
+    panelSplit: clampPanelSplit(session.panelSplit),
+    terminalVisible: Boolean(session.terminalVisible),
+    terminalHeight: clampTerminalHeight(session.terminalHeight),
     showHiddenFiles: Boolean(session.showHiddenFiles),
     window: session.window ?? null,
   };
+}
+
+export function clampTerminalHeight(
+  height: unknown,
+  maximum = MAX_TERMINAL_HEIGHT,
+): number {
+  if (typeof height !== "number" || !Number.isFinite(height)) {
+    return DEFAULT_TERMINAL_HEIGHT;
+  }
+
+  const maxHeight = Math.max(
+    MIN_TERMINAL_HEIGHT,
+    Math.min(Math.round(maximum), MAX_TERMINAL_HEIGHT),
+  );
+  return Math.min(Math.max(Math.round(height), MIN_TERMINAL_HEIGHT), maxHeight);
+}
+
+export function clampPanelSplit(
+  split: unknown,
+  minimum = MIN_PANEL_SPLIT,
+  maximum = MAX_PANEL_SPLIT,
+): number {
+  if (typeof split !== "number" || !Number.isFinite(split)) {
+    return DEFAULT_PANEL_SPLIT;
+  }
+
+  const min = Math.max(0.05, Math.min(minimum, 0.5));
+  const max = Math.min(0.95, Math.max(maximum, 0.5));
+  return Math.min(Math.max(split, min), max);
 }
 
 export function navigateTab(tab: TabState, path: string): TabState {

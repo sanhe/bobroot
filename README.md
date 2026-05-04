@@ -23,6 +23,8 @@ Bobroot is a small cross-platform desktop file manager for macOS, Ubuntu, and Wi
 - Copy and move selected items to the opposite panel
 - Copy selected file and folder paths to the clipboard
 - Cmd-drag selected items into Terminal on macOS to insert shell-safe paths
+- Resizable left/right file panels and bottom terminal panel
+- Shell-backed terminal command execution in the active folder
 - Conflict handling: replace, skip, or rename with a suffix
 - Open files and folders with the default system application
 - Rename, create folder, move to Trash/Bin/Recycle Bin, and permanent delete with confirmation
@@ -122,6 +124,7 @@ Tauri writes release artifacts under `src-tauri/target/release/bundle`.
 - Open selected folder in a new tab: `Cmd+Enter` on macOS, `Ctrl+Enter` on Linux and Windows
 - Copy selected path(s): `Cmd+Option+C` on macOS, `Ctrl+Shift+C` on Linux and Windows
 - Insert path(s) into a terminal by drag and drop: `Cmd+Drag` on macOS, `Ctrl+Drag` on Linux and Windows
+- Toggle bottom terminal: `Cmd+\`` on macOS, `Ctrl+\`` on Linux and Windows
 - Create folder: `Cmd+Shift+N` on macOS, `Ctrl+Shift+N` on Linux and Windows
 - Switch active panel: `Tab`
 - Match active panel to the opposite panel folder: `Cmd+Option+S` on macOS, `Ctrl+Alt+S` on Linux and Windows

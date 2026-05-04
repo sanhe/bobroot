@@ -58,6 +58,10 @@ export function newFolderShortcut(platform = currentPlatform()): string {
   return platform === "macos" ? "Cmd+Shift+N" : "Ctrl+Shift+N";
 }
 
+export function terminalShortcut(platform = currentPlatform()): string {
+  return platform === "macos" ? "Cmd+`" : "Ctrl+`";
+}
+
 export function trashTargetName(platform = currentPlatform()): string {
   if (platform === "windows") {
     return "Recycle Bin";
