@@ -89,6 +89,12 @@ enum ConflictStrategy {
     Rename,
 }
 
+#[derive(Debug)]
+struct ResolvedTarget {
+    path: PathBuf,
+    replace_existing: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct SessionData {
@@ -103,20 +109,11 @@ struct SessionData {
     window: Option<WindowSession>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PanelSession {
     tabs: Vec<TabSession>,
     active_tab_id: Option<String>,
-}
-
-impl Default for PanelSession {
-    fn default() -> Self {
-        Self {
-            tabs: Vec::new(),
-            active_tab_id: None,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -418,7 +415,7 @@ fn reveal_path(path: String) -> CommandResult<()> {
 fn rename_item(path: String, new_name: String) -> CommandResult<String> {
     let source = normalize_input_path(&path)?;
     let trimmed_name = new_name.trim();
-    if trimmed_name.is_empty() || trimmed_name.contains(std::path::MAIN_SEPARATOR) {
+    if !is_valid_entry_name(trimmed_name) {
         return Err(CommandError::new(
             "invalid_name",
             "Enter a valid file or folder name",
@@ -449,7 +446,7 @@ fn create_folder(parent_dir: String, name: String) -> CommandResult<String> {
     ensure_directory(&parent)?;
 
     let trimmed_name = name.trim();
-    if trimmed_name.is_empty() || trimmed_name.contains(std::path::MAIN_SEPARATOR) {
+    if !is_valid_entry_name(trimmed_name) {
         return Err(CommandError::new(
             "invalid_name",
             "Enter a valid folder name",
@@ -740,16 +737,27 @@ fn copy_one(
         });
     };
 
+    if target.replace_existing {
+        prevent_replace_source(&source, &target.path)?;
+    }
+
     if metadata.is_dir() {
-        prevent_copy_into_self(&source, &target)?;
-        copy_dir_recursive(&source, &target)?;
+        prevent_copy_into_self(&source, &target.path)?;
+    }
+
+    if target.replace_existing {
+        remove_existing(&target.path)?;
+    }
+
+    if metadata.is_dir() {
+        copy_dir_recursive(&source, &target.path)?;
     } else {
-        fs::copy(&source, &target)?;
+        fs::copy(&source, &target.path)?;
     }
 
     Ok(OperationItemResult {
         source: path_to_string(source),
-        destination: Some(path_to_string(target)),
+        destination: Some(path_to_string(target.path)),
         status: "copied".to_string(),
         message: None,
     })
@@ -778,22 +786,30 @@ fn move_one(
         });
     };
 
-    if metadata.is_dir() {
-        prevent_copy_into_self(&source, &target)?;
+    if target.replace_existing {
+        prevent_replace_source(&source, &target.path)?;
     }
 
-    match fs::rename(&source, &target) {
+    if metadata.is_dir() {
+        prevent_copy_into_self(&source, &target.path)?;
+    }
+
+    if target.replace_existing {
+        remove_existing(&target.path)?;
+    }
+
+    match fs::rename(&source, &target.path) {
         Ok(()) => {}
         Err(rename_error) => {
             if metadata.is_dir() {
-                copy_dir_recursive(&source, &target)?;
+                copy_dir_recursive(&source, &target.path)?;
                 fs::remove_dir_all(&source)?;
             } else {
-                fs::copy(&source, &target)?;
+                fs::copy(&source, &target.path)?;
                 fs::remove_file(&source)?;
             }
 
-            if target.exists() {
+            if target.path.exists() {
                 let _ = rename_error;
             }
         }
@@ -801,7 +817,7 @@ fn move_one(
 
     Ok(OperationItemResult {
         source: path_to_string(source),
-        destination: Some(path_to_string(target)),
+        destination: Some(path_to_string(target.path)),
         status: "moved".to_string(),
         message: None,
     })
@@ -811,7 +827,7 @@ fn resolve_target(
     source: &Path,
     destination_dir: &Path,
     conflict_strategy: ConflictStrategy,
-) -> CommandResult<Option<PathBuf>> {
+) -> CommandResult<Option<ResolvedTarget>> {
     let name = source.file_name().ok_or_else(|| {
         CommandError::new(
             "invalid_path",
@@ -821,16 +837,22 @@ fn resolve_target(
     let target = destination_dir.join(name);
 
     if !path_exists(&target)? {
-        return Ok(Some(target));
+        return Ok(Some(ResolvedTarget {
+            path: target,
+            replace_existing: false,
+        }));
     }
 
     match conflict_strategy {
         ConflictStrategy::Skip => Ok(None),
-        ConflictStrategy::Replace => {
-            remove_existing(&target)?;
-            Ok(Some(target))
-        }
-        ConflictStrategy::Rename => Ok(Some(next_available_copy_name(&target))),
+        ConflictStrategy::Replace => Ok(Some(ResolvedTarget {
+            path: target,
+            replace_existing: true,
+        })),
+        ConflictStrategy::Rename => Ok(Some(ResolvedTarget {
+            path: next_available_copy_name(&target),
+            replace_existing: false,
+        })),
     }
 }
 
@@ -846,9 +868,56 @@ fn copy_dir_recursive(source: &Path, target: &Path) -> CommandResult<()> {
             copy_dir_recursive(&source_child, &target_child)?;
         } else if file_type.is_file() {
             fs::copy(&source_child, &target_child)?;
+        } else if file_type.is_symlink() {
+            copy_symlink(&source_child, &target_child)?;
+        } else {
+            return Err(CommandError::new(
+                "unsupported",
+                format!("Unsupported filesystem item '{}'", source_child.display()),
+            ));
         }
     }
     Ok(())
+}
+
+fn copy_symlink(source: &Path, target: &Path) -> CommandResult<()> {
+    let link_target = fs::read_link(source)?;
+    copy_symlink_platform(source, target, &link_target)
+}
+
+#[cfg(unix)]
+fn copy_symlink_platform(_source: &Path, target: &Path, link_target: &Path) -> CommandResult<()> {
+    std::os::unix::fs::symlink(link_target, target)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn copy_symlink_platform(source: &Path, target: &Path, link_target: &Path) -> CommandResult<()> {
+    let target_metadata = fs::metadata(source).map_err(|error| {
+        CommandError::new(
+            "unsupported",
+            format!(
+                "Could not inspect symlink target '{}': {}",
+                source.display(),
+                error
+            ),
+        )
+    })?;
+
+    if target_metadata.is_dir() {
+        std::os::windows::fs::symlink_dir(link_target, target)?;
+    } else {
+        std::os::windows::fs::symlink_file(link_target, target)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn copy_symlink_platform(source: &Path, _target: &Path, _link_target: &Path) -> CommandResult<()> {
+    Err(CommandError::new(
+        "unsupported",
+        format!("Unsupported filesystem item '{}'", source.display()),
+    ))
 }
 
 fn next_available_copy_name(path: &Path) -> PathBuf {
@@ -1004,6 +1073,10 @@ fn ensure_directory(path: &Path) -> CommandResult<()> {
     }
 }
 
+fn is_valid_entry_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('/') && !name.contains('\\')
+}
+
 fn resolve_existing_directory(path: &str) -> CommandResult<PathBuf> {
     if path.trim().is_empty() {
         let home = dirs_next::home_dir()
@@ -1130,6 +1203,24 @@ fn prevent_copy_into_self(source: &Path, target: &Path) -> CommandResult<()> {
     Ok(())
 }
 
+fn prevent_replace_source(source: &Path, target: &Path) -> CommandResult<()> {
+    let source = source.canonicalize()?;
+    let target = match target.canonicalize() {
+        Ok(target) => target,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    if source == target {
+        return Err(CommandError::new(
+            "invalid_destination",
+            "Cannot replace an item with itself",
+        ));
+    }
+
+    Ok(())
+}
+
 fn normalize_input_path(path: &str) -> CommandResult<PathBuf> {
     if path.trim().is_empty() {
         return dirs_next::home_dir()
@@ -1161,6 +1252,36 @@ fn current_timestamp_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(TerminalSessions::default())
+        .invoke_handler(tauri::generate_handler![
+            home_dir,
+            list_directory,
+            copy_items,
+            move_items,
+            move_to_trash,
+            permanently_delete,
+            open_path,
+            preview_path,
+            reveal_path,
+            rename_item,
+            create_folder,
+            run_terminal_command,
+            start_terminal_session,
+            write_terminal_data,
+            resize_terminal_session,
+            stop_terminal_session,
+            resolve_terminal_directory,
+            load_session,
+            save_session,
+            append_action_log
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Bobroot");
 }
 
 #[cfg(test)]
@@ -1253,6 +1374,73 @@ mod tests {
     }
 
     #[test]
+    fn copy_one_replace_rejects_self_without_deleting_source() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("note.txt");
+
+        write_file(&source, "source");
+
+        let error = copy_one(path_str(&source), temp.path(), ConflictStrategy::Replace)
+            .expect_err("copying over itself should fail");
+
+        assert_eq!(error.kind, "invalid_destination");
+        assert_eq!(read_file(&source), "source");
+    }
+
+    #[test]
+    fn copy_one_replace_rejects_nested_destination_without_deleting_target() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("project");
+        let destination_dir = source.join("nested");
+        let existing_target = destination_dir.join("project");
+        let nested_file = existing_target.join("keep.txt");
+
+        fs::create_dir_all(&destination_dir).unwrap();
+        fs::create_dir_all(&existing_target).unwrap();
+        write_file(&nested_file, "keep");
+
+        let error = copy_one(
+            path_str(&source),
+            &destination_dir,
+            ConflictStrategy::Replace,
+        )
+        .expect_err("copying a folder into itself should fail");
+
+        assert_eq!(error.kind, "invalid_destination");
+        assert_eq!(read_file(&nested_file), "keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_one_copies_directory_symlink_recursively() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("project");
+        let linked_target = temp.path().join("target.txt");
+        let link = source.join("target-link.txt");
+        let destination_dir = temp.path().join("destination");
+        let copied_link = destination_dir.join("project").join("target-link.txt");
+
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&destination_dir).unwrap();
+        write_file(&linked_target, "target");
+        unix_fs::symlink(&linked_target, &link).expect("symlink should be created");
+
+        let result = copy_one(
+            path_str(&source),
+            &destination_dir,
+            ConflictStrategy::Rename,
+        )
+        .expect("directory copy should succeed");
+
+        assert_eq!(result.status, "copied");
+        assert!(fs::symlink_metadata(&copied_link)
+            .expect("copied link should exist")
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_link(&copied_link).unwrap(), linked_target);
+    }
+
+    #[test]
     fn move_one_skips_conflicting_file_when_requested() {
         let temp = tempdir().unwrap();
         let source = temp.path().join("todo.txt");
@@ -1294,6 +1482,20 @@ mod tests {
         assert_eq!(result.destination, Some(path_to_string(target.clone())));
         assert!(!source.exists());
         assert_eq!(read_file(&target), "source");
+    }
+
+    #[test]
+    fn move_one_replace_rejects_self_without_deleting_source() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("todo.txt");
+
+        write_file(&source, "source");
+
+        let error = move_one(path_str(&source), temp.path(), ConflictStrategy::Replace)
+            .expect_err("moving over itself should fail");
+
+        assert_eq!(error.kind, "invalid_destination");
+        assert_eq!(read_file(&source), "source");
     }
 
     #[test]
@@ -1343,34 +1545,12 @@ mod tests {
 
         assert_eq!(error.kind, "invalid_destination");
     }
-}
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .manage(TerminalSessions::default())
-        .invoke_handler(tauri::generate_handler![
-            home_dir,
-            list_directory,
-            copy_items,
-            move_items,
-            move_to_trash,
-            permanently_delete,
-            open_path,
-            preview_path,
-            reveal_path,
-            rename_item,
-            create_folder,
-            run_terminal_command,
-            start_terminal_session,
-            write_terminal_data,
-            resize_terminal_session,
-            stop_terminal_session,
-            resolve_terminal_directory,
-            load_session,
-            save_session,
-            append_action_log
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running Bobroot");
+    #[test]
+    fn entry_name_validation_rejects_path_separators() {
+        assert!(is_valid_entry_name("folder"));
+        assert!(!is_valid_entry_name(""));
+        assert!(!is_valid_entry_name("nested/name"));
+        assert!(!is_valid_entry_name("nested\\name"));
+    }
 }

@@ -20,11 +20,15 @@ import {
 import { basename, displayPath } from "../lib/format";
 import { IconButton } from "./IconButton";
 
+export type TerminalCloseScope = "panel" | "tab";
+
 interface TerminalPanelProps {
   cwd: string;
   activeDirectory: string;
   onCwdChange: (cwd: string) => void;
   onClose: () => void;
+  onBeforeClose: (scope: TerminalCloseScope, runningCount: number) => Promise<boolean>;
+  onLiveSessionCountChange: (count: number) => void;
 }
 
 interface TerminalOutputPayload {
@@ -54,6 +58,8 @@ export function TerminalPanel({
   activeDirectory,
   onCwdChange,
   onClose,
+  onBeforeClose,
+  onLiveSessionCountChange,
 }: TerminalPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [createTerminalTab(cwd)]);
   const [activeTabId, setActiveTabId] = useState(() => tabs[0]?.id ?? "");
@@ -69,6 +75,17 @@ export function TerminalPanel({
 
     onCwdChange(activeCwd);
   }, [activeCwd, activeTabId, onClose, onCwdChange]);
+
+  useEffect(() => {
+    onLiveSessionCountChange(tabs.filter((tab) => isLiveTerminalStatus(tab.status)).length);
+  }, [onLiveSessionCountChange, tabs]);
+
+  useEffect(
+    () => () => {
+      onLiveSessionCountChange(0);
+    },
+    [onLiveSessionCountChange],
+  );
 
   const updateTab = useCallback(
     (tabId: string, updater: (tab: TerminalTab) => TerminalTab) => {
@@ -87,7 +104,21 @@ export function TerminalPanel({
     [activeDirectory, onCwdChange],
   );
 
-  const closeTab = useCallback(
+  const closePanel = useCallback(() => {
+    const runningCount = tabs.filter((tab) => isLiveTerminalStatus(tab.status)).length;
+    if (runningCount === 0) {
+      onClose();
+      return;
+    }
+
+    void onBeforeClose("panel", runningCount).then((confirmed) => {
+      if (confirmed) {
+        onClose();
+      }
+    });
+  }, [onBeforeClose, onClose, tabs]);
+
+  const closeTabNow = useCallback(
     (tabId: string) => {
       if (tabs.length <= 1) {
         onClose();
@@ -108,6 +139,25 @@ export function TerminalPanel({
       }
     },
     [activeTabId, onClose, onCwdChange, tabs],
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((tab) => tab.id === tabId);
+      const runningCount = tab && isLiveTerminalStatus(tab.status) ? 1 : 0;
+
+      if (runningCount === 0) {
+        closeTabNow(tabId);
+        return;
+      }
+
+      void onBeforeClose("tab", runningCount).then((confirmed) => {
+        if (confirmed) {
+          closeTabNow(tabId);
+        }
+      });
+    },
+    [closeTabNow, onBeforeClose, tabs],
   );
 
   const restartInActiveDirectory = useCallback(() => {
@@ -183,7 +233,7 @@ export function TerminalPanel({
           <IconButton label="Clear terminal" onClick={clearTerminal}>
             <Trash2 size={16} />
           </IconButton>
-          <IconButton label="Close terminal" onClick={onClose}>
+          <IconButton label="Close terminal" onClick={closePanel}>
             <X size={16} />
           </IconButton>
         </div>
@@ -412,6 +462,10 @@ function createTerminalTab(cwd: string): TerminalTab {
     restartToken: 0,
     status: "starting",
   };
+}
+
+function isLiveTerminalStatus(status: TerminalStatus) {
+  return status === "starting" || status === "running";
 }
 
 function errorToMessage(error: unknown): string {

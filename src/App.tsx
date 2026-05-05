@@ -72,7 +72,7 @@ import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { FilePanel } from "./components/FilePanel";
 import { IconButton } from "./components/IconButton";
-import { TerminalPanel } from "./components/TerminalPanel";
+import { TerminalPanel, type TerminalCloseScope } from "./components/TerminalPanel";
 
 type ListingMap = Record<string, DirectoryListing | null>;
 type LoadingMap = Record<string, boolean>;
@@ -115,6 +115,7 @@ function App() {
   const [renameState, setRenameState] = useState<RenameState | null>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
   const [terminalCwd, setTerminalCwd] = useState<string | null>(null);
+  const [terminalLiveSessionCount, setTerminalLiveSessionCount] = useState(0);
   const saveTimer = useRef<number | null>(null);
   const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -445,17 +446,45 @@ function App() {
     });
   }, [recordAction, rightPanelVisible]);
 
-  const toggleTerminal = useCallback(() => {
+  const confirmTerminalClose = useCallback(
+    (scope: TerminalCloseScope, runningCount: number) => {
+      const sessionLabel = runningCount === 1 ? "session" : "sessions";
+      const target = scope === "panel" ? "the terminal" : "this terminal tab";
+
+      return requestConfirmation({
+        title: scope === "panel" ? "Close terminal" : "Close terminal tab",
+        message: `Close ${target} and stop ${runningCount} live terminal ${sessionLabel}?`,
+        confirmLabel: "Close",
+        destructive: true,
+      });
+    },
+    [requestConfirmation],
+  );
+
+  const toggleTerminal = useCallback(async () => {
     if (!session) {
       return;
     }
 
     const nextVisible = !session.terminalVisible;
+    if (!nextVisible && terminalLiveSessionCount > 0) {
+      const confirmed = await confirmTerminalClose("panel", terminalLiveSessionCount);
+      if (!confirmed) {
+        recordAction("close_terminal_cancelled", {
+          runningCount: terminalLiveSessionCount,
+        });
+        return;
+      }
+    }
+
     recordAction("toggle_terminal", { visible: nextVisible });
     setContextMenu(null);
     setRenameState(null);
     if (nextVisible) {
       setTerminalCwd(activeTab(session[session.activePanel]).path);
+      setTerminalLiveSessionCount(1);
+    } else {
+      setTerminalLiveSessionCount(0);
     }
     setSession((previous) =>
       previous
@@ -465,10 +494,11 @@ function App() {
           }
         : previous,
     );
-  }, [recordAction, session]);
+  }, [confirmTerminalClose, recordAction, session, terminalLiveSessionCount]);
 
   const closeTerminal = useCallback(() => {
     recordAction("close_terminal");
+    setTerminalLiveSessionCount(0);
     setSession((previous) =>
       previous
         ? {
@@ -1533,8 +1563,10 @@ function App() {
           <TerminalPanel
             activeDirectory={activeDirectory}
             cwd={currentTerminalCwd}
+            onBeforeClose={confirmTerminalClose}
             onClose={closeTerminal}
             onCwdChange={setTerminalCwd}
+            onLiveSessionCountChange={setTerminalLiveSessionCount}
           />
         ) : null}
       </div>
