@@ -258,10 +258,25 @@ button {
   flex: 1;
   padding-left: 8px;
   color: #515862;
+  cursor: text;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: text;
   white-space: nowrap;
+}
+
+.path-segment {
+  border-radius: 4px;
+  color: inherit;
+}
+
+.path-label.modifier-active .path-segment {
+  cursor: pointer;
+}
+
+.path-label.modifier-active .path-segment:hover {
+  color: #0b5cab;
 }
 
 .file-table {

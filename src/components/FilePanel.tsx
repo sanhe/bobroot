@@ -9,9 +9,10 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
-import { basename, displayPath, formatBytes, formatDate } from "../lib/format";
+import { basename, formatBytes, formatDate } from "../lib/format";
+import type { AppPlatform } from "../lib/platform";
 import type { DirectoryListing, FileEntry, PanelId, PanelState } from "../lib/types";
 import { activeTab } from "../lib/tabState";
 import { IconButton } from "./IconButton";
@@ -22,6 +23,7 @@ interface FilePanelProps {
   listing: DirectoryListing | null;
   loading: boolean;
   isActive: boolean;
+  platform: AppPlatform;
   onActivate: (panelId: PanelId) => void;
   onSwitchTab: (panelId: PanelId, tabId: string) => void;
   onNewTab: (panelId: PanelId) => void;
@@ -40,6 +42,7 @@ interface FilePanelProps {
     entry: FileEntry,
     position: { x: number; y: number },
   ) => void;
+  onNavigateToPath: (panelId: PanelId, path: string) => void;
   onCreateFolder: (panelId: PanelId) => void;
   renamingPath: string | null;
   renamingName: string;
@@ -54,6 +57,7 @@ export function FilePanel({
   listing,
   loading,
   isActive,
+  platform,
   onActivate,
   onSwitchTab,
   onNewTab,
@@ -64,6 +68,7 @@ export function FilePanel({
   onOpenEntry,
   onEntryDragStart,
   onEntryContextMenu,
+  onNavigateToPath,
   onCreateFolder,
   renamingPath,
   renamingName,
@@ -131,9 +136,11 @@ export function FilePanel({
         <IconButton label="New folder" onClick={() => onCreateFolder(panelId)}>
           <FolderPlus size={16} />
         </IconButton>
-        <div className="path-label" title={tab.path}>
-          {displayPath(listing?.path ?? tab.path)}
-        </div>
+        <PathLabel
+          path={listing?.path ?? tab.path}
+          platform={platform}
+          onNavigate={(path) => onNavigateToPath(panelId, path)}
+        />
       </div>
 
       <div className="file-table" role="table" aria-label={`${panelId} files`}>
@@ -184,6 +191,141 @@ export function FilePanel({
       </div>
     </section>
   );
+}
+
+interface PathLabelProps {
+  path: string;
+  platform: AppPlatform;
+  onNavigate: (path: string) => void;
+}
+
+interface PathSegment {
+  label: string;
+  path: string;
+  separatorBefore: string;
+}
+
+function PathLabel({ path, platform, onNavigate }: PathLabelProps) {
+  const segments = pathSegments(path);
+  const modifierLabel = platform === "macos" ? "Cmd-click" : "Ctrl-click";
+  const [modifierPressed, setModifierPressed] = useState(false);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      setModifierPressed(platform === "macos" ? event.metaKey : event.ctrlKey);
+    };
+    const onKeyUp = (event: globalThis.KeyboardEvent) => {
+      setModifierPressed(platform === "macos" ? event.metaKey : event.ctrlKey);
+    };
+    const resetModifier = () => setModifierPressed(false);
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", resetModifier);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", resetModifier);
+    };
+  }, [platform]);
+
+  const onSegmentClick = (
+    event: MouseEvent<HTMLSpanElement>,
+    segmentPath: string,
+  ) => {
+    const modifierPressed = platform === "macos" ? event.metaKey : event.ctrlKey;
+    if (!modifierPressed) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    onNavigate(segmentPath);
+  };
+
+  return (
+    <div
+      className={`path-label ${modifierPressed ? "modifier-active" : ""}`}
+      title={`${path}\n${modifierLabel} a folder to open it`}
+    >
+      {segments.map((segment, index) => (
+        <span key={`${segment.path}-${index}`}>
+          {segment.separatorBefore}
+          <span
+            className="path-segment"
+            onClick={(event) => onSegmentClick(event, segment.path)}
+            title={`${modifierLabel} to open ${segment.path}`}
+          >
+            {segment.label}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function pathSegments(path: string): PathSegment[] {
+  const separator = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+
+  if (separator === "\\") {
+    return windowsPathSegments(path);
+  }
+
+  return posixPathSegments(path);
+}
+
+function posixPathSegments(path: string): PathSegment[] {
+  const segments: PathSegment[] = [];
+  const isAbsolute = path.startsWith("/");
+  const parts = path.split("/").filter(Boolean);
+  let currentPath = isAbsolute ? "/" : "";
+
+  if (isAbsolute) {
+    segments.push({ label: "/", path: "/", separatorBefore: "" });
+  }
+
+  for (const part of parts) {
+    currentPath =
+      currentPath === "" || currentPath === "/"
+        ? `${currentPath}${part}`
+        : `${currentPath}/${part}`;
+    segments.push({
+      label: part,
+      path: currentPath,
+      separatorBefore: segments.length === 0 || currentPath === `/${part}` ? "" : "/",
+    });
+  }
+
+  return segments.length > 0 ? segments : [{ label: path, path, separatorBefore: "" }];
+}
+
+function windowsPathSegments(path: string): PathSegment[] {
+  const segments: PathSegment[] = [];
+  const driveMatch = path.match(/^[A-Za-z]:/);
+  const rawParts = path.split("\\").filter(Boolean);
+  let parts = rawParts;
+  let currentPath = "";
+
+  if (driveMatch) {
+    const drive = driveMatch[0];
+    currentPath = `${drive}\\`;
+    segments.push({ label: drive, path: currentPath, separatorBefore: "" });
+    parts = rawParts.slice(rawParts[0] === drive ? 1 : 0);
+  }
+
+  for (const part of parts) {
+    currentPath =
+      currentPath === "" || currentPath.endsWith("\\")
+        ? `${currentPath}${part}`
+        : `${currentPath}\\${part}`;
+    segments.push({
+      label: part,
+      path: currentPath,
+      separatorBefore: segments.length === 0 ? "" : "\\",
+    });
+  }
+
+  return segments.length > 0 ? segments : [{ label: path, path, separatorBefore: "" }];
 }
 
 interface FileRowProps {

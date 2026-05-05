@@ -1415,6 +1415,7 @@ function App() {
             listing={listings[activeTab(session.left).id] ?? null}
             loading={Boolean(loading[activeTab(session.left).id])}
             isActive={session.activePanel === "left"}
+            platform={platform}
             onActivate={setActivePanel}
             onSwitchTab={switchTab}
             onNewTab={newTab}
@@ -1425,6 +1426,7 @@ function App() {
             onOpenEntry={openEntry}
             onEntryDragStart={startPathDrag}
             onEntryContextMenu={openEntryContextMenu}
+            onNavigateToPath={navigateTo}
             onCreateFolder={createFolderInPanel}
             renamingPath={renameState?.panelId === "left" ? renameState.path : null}
             renamingName={renameState?.panelId === "left" ? renameState.name : ""}
@@ -1473,6 +1475,7 @@ function App() {
               listing={listings[activeTab(session.right).id] ?? null}
               loading={Boolean(loading[activeTab(session.right).id])}
               isActive={session.activePanel === "right"}
+              platform={platform}
               onActivate={setActivePanel}
               onSwitchTab={switchTab}
               onNewTab={newTab}
@@ -1483,6 +1486,7 @@ function App() {
               onOpenEntry={openEntry}
               onEntryDragStart={startPathDrag}
               onEntryContextMenu={openEntryContextMenu}
+              onNavigateToPath={navigateTo}
               onCreateFolder={createFolderInPanel}
               renamingPath={renameState?.panelId === "right" ? renameState.path : null}
               renamingName={renameState?.panelId === "right" ? renameState.name : ""}
