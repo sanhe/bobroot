@@ -2,6 +2,10 @@
 
 Bobroot is a small cross-platform desktop file manager for macOS, Ubuntu, and Windows. It uses a classic dual-pane layout with a minimal Apple-like interface, independent tabs per panel, session restore, basic filesystem operations, and system-native file preview where available.
 
+## Status
+
+Bobroot is early-stage experimental software. It is useful for trying the interface and development direction, but it has not been hardened as a production file manager. Test it on disposable folders before trusting it with important files.
+
 ## Stack
 
 - Tauri 2
@@ -133,4 +137,10 @@ Tauri writes release artifacts under `src-tauri/target/release/bundle`.
 
 ## Safety Notes
 
-Regular delete moves items to Trash/Bin/Recycle Bin after confirmation. Permanent deletion is only exposed through the explicit permanent-delete command path and always asks for confirmation with an irreversible-action warning.
+File operations can change or remove local data. Regular delete moves items to the platform Trash/Bin/Recycle Bin after confirmation, but platform trash behavior can still vary by OS, filesystem, mounted volume, and permissions. Verify the selected items before confirming.
+
+Permanent delete bypasses Trash/Bin/Recycle Bin and removes files or folders from the filesystem. It is only exposed through the explicit permanent-delete command path and always asks for confirmation with an irreversible-action warning.
+
+## License
+
+Bobroot is available under the MIT License. See [LICENSE](LICENSE).
