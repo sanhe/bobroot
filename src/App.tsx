@@ -99,6 +99,13 @@ interface RenameState {
   name: string;
 }
 
+interface ConfirmationState {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  destructive?: boolean;
+}
+
 function App() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [listings, setListings] = useState<ListingMap>({});
@@ -106,8 +113,10 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renameState, setRenameState] = useState<RenameState | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
   const [terminalCwd, setTerminalCwd] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const panelsRef = useRef<HTMLDivElement>(null);
 
@@ -135,6 +144,30 @@ function App() {
   const recordAction = useCallback(
     (action: string, details: ActionLogDetails = {}) => {
       void logAction(action, details).catch(() => undefined);
+    },
+    [],
+  );
+
+  const requestConfirmation = useCallback((nextConfirmation: ConfirmationState) => {
+    confirmationResolver.current?.(false);
+    setConfirmation(nextConfirmation);
+
+    return new Promise<boolean>((resolve) => {
+      confirmationResolver.current = resolve;
+    });
+  }, []);
+
+  const resolveConfirmation = useCallback((confirmed: boolean) => {
+    const resolver = confirmationResolver.current;
+    confirmationResolver.current = null;
+    setConfirmation(null);
+    resolver?.(confirmed);
+  }, []);
+
+  useEffect(
+    () => () => {
+      confirmationResolver.current?.(false);
+      confirmationResolver.current = null;
     },
     [],
   );
@@ -992,9 +1025,12 @@ function App() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Move ${selectedPaths.length} selected item(s) to ${trashName}?`,
-    );
+    const confirmed = await requestConfirmation({
+      title: `Move to ${trashName}`,
+      message: `Move ${selectedPaths.length} selected item(s) to ${trashName}?`,
+      confirmLabel: `Move to ${trashName}`,
+      destructive: true,
+    });
     if (!confirmed) {
       recordAction("trash_cancelled", { items: selectedPaths });
       return;
@@ -1012,7 +1048,7 @@ function App() {
       });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, recordAction, refreshPanel, reportNotice, session, trashName]);
+  }, [listings, recordAction, refreshPanel, reportNotice, requestConfirmation, session, trashName]);
 
   const deleteSelectedPermanently = useCallback(async () => {
     recordAction("permanent_delete_requested", {
@@ -1028,9 +1064,12 @@ function App() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Permanently delete ${selectedPaths.length} selected item(s)? This cannot be undone.`,
-    );
+    const confirmed = await requestConfirmation({
+      title: "Permanently delete",
+      message: `Permanently delete ${selectedPaths.length} selected item(s)? This cannot be undone.`,
+      confirmLabel: "Delete Permanently",
+      destructive: true,
+    });
     if (!confirmed) {
       recordAction("permanent_delete_cancelled", { items: selectedPaths });
       return;
@@ -1051,7 +1090,7 @@ function App() {
       });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, recordAction, refreshPanel, reportNotice, session]);
+  }, [listings, recordAction, refreshPanel, reportNotice, requestConfirmation, session]);
 
   const renameSelected = useCallback(() => {
     recordAction("rename_requested", { panelId: session?.activePanel ?? null });
@@ -1252,7 +1291,7 @@ function App() {
       trashSelected,
     ],
   );
-  useKeyboardShortcuts(shortcutHandlers);
+  useKeyboardShortcuts(shortcutHandlers, confirmation === null);
 
   if (!session) {
     return (
@@ -1528,6 +1567,46 @@ function App() {
           >
             Copy Path ({copyPathKey})
           </button>
+        </div>
+      ) : null}
+      {confirmation ? (
+        <div
+          className="confirmation-overlay"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              resolveConfirmation(false);
+            }
+          }}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="confirmation-dialog"
+            role="dialog"
+            aria-labelledby="confirmation-title"
+            aria-describedby="confirmation-message"
+          >
+            <h2 id="confirmation-title">{confirmation.title}</h2>
+            <p id="confirmation-message">{confirmation.message}</p>
+            <div className="confirmation-actions">
+              <button
+                autoFocus
+                className="secondary-action"
+                type="button"
+                onClick={() => resolveConfirmation(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className={confirmation.destructive ? "destructive-action" : "primary-action"}
+                type="button"
+                onClick={() => resolveConfirmation(true)}
+              >
+                {confirmation.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </main>

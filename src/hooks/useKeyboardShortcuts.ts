@@ -25,8 +25,12 @@ interface ShortcutHandlers {
   openSelectedInNewTab: () => void;
 }
 
-export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
+export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true): void {
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTextInput =
@@ -281,7 +285,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
 
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [handlers]);
+  }, [enabled, handlers]);
 }
 
 function isBackspaceKey(event: KeyboardEvent): boolean {

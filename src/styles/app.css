@@ -628,6 +628,82 @@ body.terminal-resizing * {
   color: #0c467a;
 }
 
+.confirmation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(27, 34, 43, 0.28);
+}
+
+.confirmation-dialog {
+  width: min(420px, 100%);
+  padding: 18px;
+  border: 1px solid #cdd3dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 22px 48px rgba(23, 31, 42, 0.2);
+}
+
+.confirmation-dialog h2 {
+  margin: 0;
+  color: #1d1d1f;
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: 0;
+}
+
+.confirmation-dialog p {
+  margin: 10px 0 0;
+  color: #555d68;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.confirmation-actions button {
+  min-width: 86px;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid #cdd3dc;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #252a31;
+  cursor: default;
+}
+
+.confirmation-actions button:hover,
+.confirmation-actions button:focus-visible {
+  border-color: #9bb7dc;
+  outline: none;
+}
+
+.confirmation-actions .primary-action {
+  border-color: #2f7dd1;
+  background: #2f7dd1;
+  color: #ffffff;
+}
+
+.confirmation-actions .destructive-action {
+  border-color: #c83b3b;
+  background: #c83b3b;
+  color: #ffffff;
+}
+
+.confirmation-actions .destructive-action:hover,
+.confirmation-actions .destructive-action:focus-visible {
+  border-color: #9f2727;
+  background: #b83232;
+}
+
 @media (max-width: 1050px) {
   .global-actions .icon-button.with-label {
     min-width: 34px;
