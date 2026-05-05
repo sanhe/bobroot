@@ -13,6 +13,9 @@
         window.location.hostname === "localhost";
       if (isLocalTestHost && new URLSearchParams(window.location.search).has("br-test")) {
         window.__BR_TEST_ACTIONS = [];
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+          unregisterListener: () => {},
+        };
         const modified = Date.now();
         const directories = {
           "/mock/Downloads": [
@@ -67,6 +70,22 @@
               return null;
             }
             if (cmd.startsWith("plugin:window|")) {
+              return null;
+            }
+            if (cmd === "plugin:event|listen") {
+              return Math.floor(Math.random() * 1000000);
+            }
+            if (cmd.startsWith("plugin:event|")) {
+              return null;
+            }
+            if (cmd === "start_terminal_session") {
+              return "mock-terminal-session";
+            }
+            if (
+              cmd === "write_terminal_data" ||
+              cmd === "resize_terminal_session" ||
+              cmd === "stop_terminal_session"
+            ) {
               return null;
             }
             if (cmd === "list_directory") {

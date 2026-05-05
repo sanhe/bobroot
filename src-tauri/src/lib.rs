@@ -1,12 +1,20 @@
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::Command,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    thread,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
+use tauri::{AppHandle, Emitter, State};
 
 type CommandResult<T> = Result<T, CommandError>;
 
@@ -147,6 +155,48 @@ struct TerminalCommandResult {
     stderr: String,
     status: Option<i32>,
     duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutputPayload {
+    session_id: String,
+    data: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalExitPayload {
+    session_id: String,
+    status: Option<u32>,
+    message: Option<String>,
+}
+
+#[derive(Clone)]
+struct TerminalSessions {
+    inner: Arc<TerminalSessionsInner>,
+}
+
+struct TerminalSessionsInner {
+    next_id: AtomicU64,
+    sessions: Mutex<HashMap<String, TerminalSession>>,
+}
+
+struct TerminalSession {
+    master: Box<dyn MasterPty + Send>,
+    writer: Mutex<Box<dyn Write + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+}
+
+impl Default for TerminalSessions {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(TerminalSessionsInner {
+                next_id: AtomicU64::new(1),
+                sessions: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
 }
 
 #[tauri::command]
@@ -449,6 +499,155 @@ fn run_terminal_command(command: String, cwd: String) -> CommandResult<TerminalC
         status: output.status.code(),
         duration_ms: started.elapsed().as_millis() as u64,
     })
+}
+
+#[tauri::command]
+fn start_terminal_session(
+    app: AppHandle,
+    state: State<'_, TerminalSessions>,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> CommandResult<String> {
+    let working_dir = resolve_existing_directory(&cwd)?;
+    let size = terminal_size(cols, rows);
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(size)
+        .map_err(|error| terminal_pty_error("open_pty", error))?;
+
+    let command = terminal_interactive_shell_command(&working_dir);
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| terminal_pty_error("spawn_shell", error))?;
+    let killer = child.clone_killer();
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| terminal_pty_error("clone_pty_reader", error))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| terminal_pty_error("open_pty_writer", error))?;
+
+    let session_id = format!(
+        "terminal-{}",
+        state.inner.next_id.fetch_add(1, Ordering::Relaxed)
+    );
+    let session = TerminalSession {
+        master: pair.master,
+        writer: Mutex::new(writer),
+        killer: Mutex::new(killer),
+    };
+
+    {
+        let mut sessions = lock_terminal_sessions(&state.inner)?;
+        sessions.insert(session_id.clone(), session);
+    }
+
+    let output_session_id = session_id.clone();
+    let output_app = app.clone();
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(length) => {
+                    let data = String::from_utf8_lossy(&buffer[..length]).into_owned();
+                    let _ = output_app.emit(
+                        "terminal-output",
+                        TerminalOutputPayload {
+                            session_id: output_session_id.clone(),
+                            data,
+                        },
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let exit_session_id = session_id.clone();
+    let exit_app = app;
+    let sessions = state.inner.clone();
+    thread::spawn(move || {
+        let wait_result = child.wait();
+        if let Ok(mut sessions) = sessions.sessions.lock() {
+            sessions.remove(&exit_session_id);
+        }
+
+        let payload = match wait_result {
+            Ok(status) => TerminalExitPayload {
+                session_id: exit_session_id,
+                status: Some(status.exit_code()),
+                message: status.signal().map(ToOwned::to_owned),
+            },
+            Err(error) => TerminalExitPayload {
+                session_id: exit_session_id,
+                status: None,
+                message: Some(error.to_string()),
+            },
+        };
+        let _ = exit_app.emit("terminal-exit", payload);
+    });
+
+    Ok(session_id)
+}
+
+#[tauri::command]
+fn write_terminal_data(
+    state: State<'_, TerminalSessions>,
+    session_id: String,
+    data: String,
+) -> CommandResult<()> {
+    let mut sessions = lock_terminal_sessions(&state.inner)?;
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| CommandError::new("not_found", "Terminal session is not running"))?;
+    let mut writer = session
+        .writer
+        .lock()
+        .map_err(|_| CommandError::new("terminal_state", "Terminal writer is unavailable"))?;
+    writer.write_all(data.as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+#[tauri::command]
+fn resize_terminal_session(
+    state: State<'_, TerminalSessions>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> CommandResult<()> {
+    let sessions = lock_terminal_sessions(&state.inner)?;
+    if let Some(session) = sessions.get(&session_id) {
+        session
+            .master
+            .resize(terminal_size(cols, rows))
+            .map_err(|error| terminal_pty_error("resize_pty", error))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_terminal_session(
+    state: State<'_, TerminalSessions>,
+    session_id: String,
+) -> CommandResult<()> {
+    let session = {
+        let mut sessions = lock_terminal_sessions(&state.inner)?;
+        sessions.remove(&session_id)
+    };
+
+    if let Some(session) = session {
+        if let Ok(mut killer) = session.killer.lock() {
+            let _ = killer.kill();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -849,6 +1048,46 @@ fn expand_terminal_path(target: &str, cwd: &Path) -> CommandResult<PathBuf> {
     }
 }
 
+fn terminal_size(cols: u16, rows: u16) -> PtySize {
+    PtySize {
+        cols: cols.clamp(20, 500),
+        rows: rows.clamp(4, 200),
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+fn lock_terminal_sessions(
+    sessions: &Arc<TerminalSessionsInner>,
+) -> CommandResult<std::sync::MutexGuard<'_, HashMap<String, TerminalSession>>> {
+    sessions
+        .sessions
+        .lock()
+        .map_err(|_| CommandError::new("terminal_state", "Terminal state is unavailable"))
+}
+
+fn terminal_pty_error(kind: &str, error: impl std::fmt::Display) -> CommandError {
+    CommandError::new(kind, error.to_string())
+}
+
+#[cfg(windows)]
+fn terminal_interactive_shell_command(cwd: &Path) -> CommandBuilder {
+    let shell = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
+    let mut command = CommandBuilder::new(shell);
+    command.cwd(cwd.as_os_str());
+    command
+}
+
+#[cfg(not(windows))]
+fn terminal_interactive_shell_command(cwd: &Path) -> CommandBuilder {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let mut command = CommandBuilder::new(shell);
+    command.cwd(cwd.as_os_str());
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command
+}
+
 #[cfg(windows)]
 fn terminal_shell_command(command: &str) -> Command {
     let shell = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
@@ -972,8 +1211,12 @@ mod tests {
         write_file(&source, "source");
         write_file(&existing, "existing");
 
-        let result = copy_one(path_str(&source), &destination_dir, ConflictStrategy::Rename)
-            .expect("copy should succeed");
+        let result = copy_one(
+            path_str(&source),
+            &destination_dir,
+            ConflictStrategy::Rename,
+        )
+        .expect("copy should succeed");
 
         assert_eq!(result.status, "copied");
         assert_eq!(result.destination, Some(path_to_string(renamed.clone())));
@@ -994,8 +1237,12 @@ mod tests {
         fs::create_dir(&destination_dir).unwrap();
         write_file(&nested_file, "fn main() {}");
 
-        let result = copy_one(path_str(&source), &destination_dir, ConflictStrategy::Rename)
-            .expect("directory copy should succeed");
+        let result = copy_one(
+            path_str(&source),
+            &destination_dir,
+            ConflictStrategy::Rename,
+        )
+        .expect("directory copy should succeed");
 
         assert_eq!(result.status, "copied");
         assert_eq!(
@@ -1036,8 +1283,12 @@ mod tests {
         write_file(&source, "source");
         write_file(&target, "existing");
 
-        let result = move_one(path_str(&source), &destination_dir, ConflictStrategy::Replace)
-            .expect("move replace should succeed");
+        let result = move_one(
+            path_str(&source),
+            &destination_dir,
+            ConflictStrategy::Replace,
+        )
+        .expect("move replace should succeed");
 
         assert_eq!(result.status, "moved");
         assert_eq!(result.destination, Some(path_to_string(target.clone())));
@@ -1097,6 +1348,7 @@ mod tests {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(TerminalSessions::default())
         .invoke_handler(tauri::generate_handler![
             home_dir,
             list_directory,
@@ -1110,6 +1362,10 @@ pub fn run() {
             rename_item,
             create_folder,
             run_terminal_command,
+            start_terminal_session,
+            write_terminal_data,
+            resize_terminal_session,
+            stop_terminal_session,
             resolve_terminal_directory,
             load_session,
             save_session,

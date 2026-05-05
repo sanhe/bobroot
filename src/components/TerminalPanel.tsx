@@ -1,9 +1,17 @@
-import { FolderSync, Terminal, Trash2, X } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal as XTerm } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { FolderSync, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
-import { resolveTerminalDirectory, runTerminalCommand } from "../lib/api";
+import {
+  resizeTerminalSession,
+  startTerminalSession,
+  stopTerminalSession,
+  writeTerminalData,
+} from "../lib/api";
 import { displayPath } from "../lib/format";
-import type { TerminalCommandResult } from "../lib/types";
 import { IconButton } from "./IconButton";
 
 interface TerminalPanelProps {
@@ -13,8 +21,15 @@ interface TerminalPanelProps {
   onClose: () => void;
 }
 
-interface TerminalEntry extends TerminalCommandResult {
-  id: string;
+interface TerminalOutputPayload {
+  sessionId: string;
+  data: string;
+}
+
+interface TerminalExitPayload {
+  sessionId: string;
+  status: number | null;
+  message: string | null;
 }
 
 export function TerminalPanel({
@@ -23,158 +38,195 @@ export function TerminalPanel({
   onCwdChange,
   onClose,
 }: TerminalPanelProps) {
-  const [input, setInput] = useState("");
-  const [entries, setEntries] = useState<TerminalEntry[]>([]);
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [running, setRunning] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const outputRef = useRef<HTMLDivElement>(null);
-  const nextEntryId = useRef(1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const unlistenRef = useRef<UnlistenFn[]>([]);
+  const [status, setStatus] = useState<string | null>("Starting");
+  const [restartToken, setRestartToken] = useState(0);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const terminal = new XTerm({
+      allowProposedApi: false,
+      convertEol: true,
+      cursorBlink: true,
+      disableStdin: true,
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      fontSize: 12,
+      macOptionIsMeta: true,
+      scrollback: 5000,
+      theme: {
+        background: "#0f1720",
+        cursor: "#edf5ff",
+        foreground: "#d8e0ea",
+        selectionBackground: "#2f7dd166",
+      },
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(container);
+    fitAddon.fit();
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+
+    const dataDisposable = terminal.onData((data) => {
+      const sessionId = sessionIdRef.current;
+      if (sessionId) {
+        void writeTerminalData(sessionId, data);
+      }
+    });
+    const resizeDisposable = terminal.onResize(({ cols, rows }) => {
+      const sessionId = sessionIdRef.current;
+      if (sessionId) {
+        void resizeTerminalSession(sessionId, cols, rows);
+      }
+    });
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+    });
+    resizeObserver.observe(container);
+
+    let disposed = false;
+    void Promise.all([
+      listen<TerminalOutputPayload>("terminal-output", (event) => {
+        if (event.payload.sessionId === sessionIdRef.current) {
+          terminal.write(event.payload.data);
+        }
+      }),
+      listen<TerminalExitPayload>("terminal-exit", (event) => {
+        if (event.payload.sessionId !== sessionIdRef.current) {
+          return;
+        }
+
+        sessionIdRef.current = null;
+        terminal.options.disableStdin = true;
+        setStatus("Exited");
+
+        if (event.payload.message) {
+          terminal.writeln(`\r\n${event.payload.message}`);
+        } else if (event.payload.status !== 0) {
+          terminal.writeln(`\r\nExited with ${event.payload.status ?? "unknown status"}`);
+        }
+      }),
+    ]).then((unlisteners) => {
+      if (disposed) {
+        unlisteners.forEach((unlisten) => unlisten());
+      } else {
+        unlistenRef.current = unlisteners;
+      }
+    });
+
+    terminal.focus();
+
+    return () => {
+      disposed = true;
+      unlistenRef.current.forEach((unlisten) => unlisten());
+      unlistenRef.current = [];
+      dataDisposable.dispose();
+      resizeDisposable.dispose();
+      resizeObserver.disconnect();
+
+      const sessionId = sessionIdRef.current;
+      sessionIdRef.current = null;
+      if (sessionId) {
+        void stopTerminalSession(sessionId);
+      }
+
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
-    const output = outputRef.current;
-    if (output) {
-      output.scrollTop = output.scrollHeight;
-    }
-  }, [entries, running]);
-
-  const appendEntry = (entry: TerminalCommandResult) => {
-    setEntries((current) => [
-      ...current,
-      {
-        ...entry,
-        id: `terminal-entry-${Date.now()}-${nextEntryId.current++}`,
-      },
-    ]);
-  };
-
-  const runCommand = async (rawCommand: string) => {
-    const command = rawCommand.trim();
-    if (!command || running) {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) {
       return;
     }
 
-    setInput("");
-    setHistoryIndex(null);
-    setCommandHistory((current) =>
-      current[current.length - 1] === command ? current : [...current, command],
-    );
-
-    if (command === "clear") {
-      setEntries([]);
-      return;
+    let cancelled = false;
+    const previousSessionId = sessionIdRef.current;
+    sessionIdRef.current = null;
+    if (previousSessionId) {
+      void stopTerminalSession(previousSessionId);
     }
 
-    const cdTarget = parseCdTarget(command);
-    if (cdTarget !== null) {
-      try {
-        const nextCwd = await resolveTerminalDirectory(cwd, cdTarget);
-        appendEntry({
-          cwd,
-          command,
-          stdout: "",
-          stderr: "",
-          status: 0,
-          durationMs: 0,
-        });
-        onCwdChange(nextCwd);
-      } catch (error) {
-        appendEntry({
-          cwd,
-          command,
-          stdout: "",
-          stderr: errorToMessage(error),
-          status: 1,
-          durationMs: 0,
-        });
-      }
-      return;
-    }
+    terminal.reset();
+    terminal.options.disableStdin = true;
+    setStatus("Starting");
+    fitAddon.fit();
 
-    setRunning(true);
-    try {
-      const result = await runTerminalCommand(command, cwd);
-      appendEntry(result);
-    } catch (error) {
-      appendEntry({
-        cwd,
-        command,
-        stdout: "",
-        stderr: errorToMessage(error),
-        status: 1,
-        durationMs: 0,
+    void startTerminalSession(cwd, terminal.cols, terminal.rows)
+      .then((sessionId) => {
+        if (cancelled) {
+          void stopTerminalSession(sessionId);
+          return;
+        }
+
+        sessionIdRef.current = sessionId;
+        terminal.options.disableStdin = false;
+        setStatus(null);
+        terminal.focus();
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setStatus("Failed");
+        terminal.writeln(`Error: ${errorToMessage(error)}`);
       });
-    } finally {
-      setRunning(false);
-      inputRef.current?.focus();
+
+    return () => {
+      cancelled = true;
+      const sessionId = sessionIdRef.current;
+      sessionIdRef.current = null;
+      if (sessionId) {
+        void stopTerminalSession(sessionId);
+      }
+    };
+  }, [cwd, restartToken]);
+
+  const restartInActiveDirectory = () => {
+    if (activeDirectory === cwd) {
+      setRestartToken((current) => current + 1);
+    } else {
+      onCwdChange(activeDirectory);
     }
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void runCommand(input);
-  };
-
-  const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (commandHistory.length === 0) {
-        return;
-      }
-
-      const nextIndex =
-        historyIndex === null
-          ? commandHistory.length - 1
-          : Math.max(0, historyIndex - 1);
-      setHistoryIndex(nextIndex);
-      setInput(commandHistory[nextIndex] ?? "");
-      return;
-    }
-
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (commandHistory.length === 0 || historyIndex === null) {
-        return;
-      }
-
-      const nextIndex = historyIndex + 1;
-      if (nextIndex >= commandHistory.length) {
-        setHistoryIndex(null);
-        setInput("");
-        return;
-      }
-
-      setHistoryIndex(nextIndex);
-      setInput(commandHistory[nextIndex] ?? "");
-    }
+  const clearTerminal = () => {
+    terminalRef.current?.clear();
+    terminalRef.current?.focus();
   };
 
   return (
     <section className="terminal-panel" aria-label="Terminal">
       <div className="terminal-header">
         <div className="terminal-title">
-          <Terminal size={16} />
+          <TerminalIcon size={16} />
           <span>Terminal</span>
         </div>
         <div className="terminal-cwd" title={cwd}>
           {displayPath(cwd)}
+          {status ? ` (${status})` : ""}
         </div>
         <div className="terminal-actions">
           <IconButton
             label={`Use active folder: ${displayPath(activeDirectory)}`}
-            onClick={() => {
-              onCwdChange(activeDirectory);
-              inputRef.current?.focus();
-            }}
+            onClick={restartInActiveDirectory}
           >
             <FolderSync size={16} />
           </IconButton>
-          <IconButton label="Clear terminal" onClick={() => setEntries([])}>
+          <IconButton label="Clear terminal" onClick={clearTerminal}>
             <Trash2 size={16} />
           </IconButton>
           <IconButton label="Close terminal" onClick={onClose}>
@@ -183,82 +235,9 @@ export function TerminalPanel({
         </div>
       </div>
 
-      <div className="terminal-output" ref={outputRef} role="log" aria-live="polite">
-        {entries.length === 0 ? (
-          <div className="terminal-empty">No output</div>
-        ) : null}
-        {entries.map((entry) => (
-          <div
-            className={`terminal-entry ${
-              entry.status !== null && entry.status !== 0 ? "failed" : ""
-            }`}
-            key={entry.id}
-          >
-            <div className="terminal-command-line">
-              <span className="terminal-prompt">{displayPath(entry.cwd)} $</span>
-              <span className="terminal-command">{entry.command}</span>
-            </div>
-            {entry.stdout ? <pre className="terminal-stream">{entry.stdout}</pre> : null}
-            {entry.stderr ? (
-              <pre className="terminal-stream terminal-stderr">{entry.stderr}</pre>
-            ) : null}
-            {entry.status !== null && entry.status !== 0 ? (
-              <div className="terminal-status">Exited with {entry.status}</div>
-            ) : null}
-          </div>
-        ))}
-        {running ? (
-          <div className="terminal-running" aria-label="Command running">
-            Running...
-          </div>
-        ) : null}
-      </div>
-
-      <form className="terminal-input-row" onSubmit={handleSubmit}>
-        <span className="terminal-input-prompt">$</span>
-        <input
-          aria-label="Terminal command"
-          autoCapitalize="off"
-          autoComplete="off"
-          autoCorrect="off"
-          disabled={running}
-          onChange={(event) => {
-            setInput(event.target.value);
-            setHistoryIndex(null);
-          }}
-          onKeyDown={handleInputKeyDown}
-          placeholder={running ? "Command running..." : "Command"}
-          ref={inputRef}
-          spellCheck={false}
-          value={input}
-        />
-      </form>
+      <div className="terminal-emulator" ref={containerRef} />
     </section>
   );
-}
-
-function parseCdTarget(command: string): string | null {
-  if (command === "cd") {
-    return "";
-  }
-
-  if (!command.startsWith("cd ")) {
-    return null;
-  }
-
-  return unquotePath(command.slice(3).trim());
-}
-
-function unquotePath(value: string): string {
-  if (value.length >= 2) {
-    const first = value[0];
-    const last = value[value.length - 1];
-    if ((first === "'" && last === "'") || (first === '"' && last === '"')) {
-      return value.slice(1, -1);
-    }
-  }
-
-  return value.replace(/\\([ "'\\])/g, "$1");
 }
 
 function errorToMessage(error: unknown): string {
@@ -267,7 +246,7 @@ function errorToMessage(error: unknown): string {
   }
 
   if (typeof error === "object" && error && "message" in error) {
-    const message = (error as { message?: unknown }).message;
+    const message = error.message;
     if (typeof message === "string") {
       return message;
     }

@@ -70,6 +70,33 @@ export async function runTerminalCommand(
   return invoke("run_terminal_command", { command, cwd });
 }
 
+export async function startTerminalSession(
+  cwd: string,
+  cols: number,
+  rows: number,
+): Promise<string> {
+  return invoke("start_terminal_session", { cwd, cols, rows });
+}
+
+export async function writeTerminalData(
+  sessionId: string,
+  data: string,
+): Promise<void> {
+  return invoke("write_terminal_data", { sessionId, data });
+}
+
+export async function resizeTerminalSession(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  return invoke("resize_terminal_session", { sessionId, cols, rows });
+}
+
+export async function stopTerminalSession(sessionId: string): Promise<void> {
+  return invoke("stop_terminal_session", { sessionId });
+}
+
 export async function resolveTerminalDirectory(
   cwd: string,
   target: string,
