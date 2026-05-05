@@ -3,15 +3,21 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { FolderSync, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  FolderSync,
+  Plus,
+  Terminal as TerminalIcon,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   resizeTerminalSession,
   startTerminalSession,
   stopTerminalSession,
   writeTerminalData,
 } from "../lib/api";
-import { displayPath } from "../lib/format";
+import { basename, displayPath } from "../lib/format";
 import { IconButton } from "./IconButton";
 
 interface TerminalPanelProps {
@@ -32,19 +38,200 @@ interface TerminalExitPayload {
   message: string | null;
 }
 
+type TerminalStatus = "starting" | "running" | "exited" | "failed";
+
+interface TerminalTab {
+  id: string;
+  cwd: string;
+  restartToken: number;
+  status: TerminalStatus;
+}
+
+let nextTerminalTabId = 1;
+
 export function TerminalPanel({
   cwd,
   activeDirectory,
   onCwdChange,
   onClose,
 }: TerminalPanelProps) {
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => [createTerminalTab(cwd)]);
+  const [activeTabId, setActiveTabId] = useState(() => tabs[0]?.id ?? "");
+  const [clearToken, setClearToken] = useState(0);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+  const activeCwd = activeTab?.cwd ?? cwd;
+
+  useEffect(() => {
+    if (!activeTab) {
+      onClose();
+      return;
+    }
+
+    onCwdChange(activeCwd);
+  }, [activeCwd, activeTabId, onClose, onCwdChange]);
+
+  const updateTab = useCallback(
+    (tabId: string, updater: (tab: TerminalTab) => TerminalTab) => {
+      setTabs((current) => current.map((tab) => (tab.id === tabId ? updater(tab) : tab)));
+    },
+    [],
+  );
+
+  const createTab = useCallback(
+    (path = activeDirectory) => {
+      const tab = createTerminalTab(path);
+      setTabs((current) => [...current, tab]);
+      setActiveTabId(tab.id);
+      onCwdChange(path);
+    },
+    [activeDirectory, onCwdChange],
+  );
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      if (tabs.length <= 1) {
+        onClose();
+        return;
+      }
+
+      const closingIndex = tabs.findIndex((tab) => tab.id === tabId);
+      const nextTabs = tabs.filter((tab) => tab.id !== tabId);
+      setTabs(nextTabs);
+
+      if (tabId === activeTabId) {
+        const nextActiveTab =
+          nextTabs[Math.max(0, Math.min(closingIndex, nextTabs.length - 1))];
+        if (nextActiveTab) {
+          setActiveTabId(nextActiveTab.id);
+          onCwdChange(nextActiveTab.cwd);
+        }
+      }
+    },
+    [activeTabId, onClose, onCwdChange, tabs],
+  );
+
+  const restartInActiveDirectory = useCallback(() => {
+    if (!activeTab) {
+      return;
+    }
+
+    updateTab(activeTab.id, (tab) => ({
+      ...tab,
+      cwd: activeDirectory,
+      restartToken: tab.restartToken + 1,
+      status: "starting",
+    }));
+    onCwdChange(activeDirectory);
+  }, [activeDirectory, activeTab, onCwdChange, updateTab]);
+
+  const clearTerminal = useCallback(() => {
+    setClearToken((current) => current + 1);
+  }, []);
+
+  const activeStatusLabel = activeTab?.status === "running" ? null : activeTab?.status;
+
+  return (
+    <section className="terminal-panel" aria-label="Terminal">
+      <div className="terminal-header">
+        <div className="terminal-title">
+          <TerminalIcon size={16} />
+          <span>Terminal</span>
+        </div>
+        <div className="terminal-tabs" role="tablist" aria-label="Terminal tabs">
+          {tabs.map((tab) => (
+            <button
+              className={`terminal-tab-button ${tab.id === activeTabId ? "selected" : ""}`}
+              key={tab.id}
+              onClick={() => {
+                setActiveTabId(tab.id);
+                onCwdChange(tab.cwd);
+              }}
+              role="tab"
+              title={tab.cwd}
+              type="button"
+            >
+              <span className={`terminal-tab-status ${tab.status}`} />
+              <span>{basename(tab.cwd) || displayPath(tab.cwd)}</span>
+              {tabs.length > 1 ? (
+                <span
+                  className="terminal-tab-close"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                >
+                  <X size={12} />
+                </span>
+              ) : null}
+            </button>
+          ))}
+          <IconButton label="New terminal tab" onClick={() => createTab()}>
+            <Plus size={16} />
+          </IconButton>
+        </div>
+        <div className="terminal-cwd" title={activeCwd}>
+          {displayPath(activeCwd)}
+          {activeStatusLabel ? ` (${activeStatusLabel})` : ""}
+        </div>
+        <div className="terminal-actions">
+          <IconButton
+            label={`Use active folder: ${displayPath(activeDirectory)}`}
+            onClick={restartInActiveDirectory}
+          >
+            <FolderSync size={16} />
+          </IconButton>
+          <IconButton label="Clear terminal" onClick={clearTerminal}>
+            <Trash2 size={16} />
+          </IconButton>
+          <IconButton label="Close terminal" onClick={onClose}>
+            <X size={16} />
+          </IconButton>
+        </div>
+      </div>
+
+      <div className="terminal-tab-views">
+        {tabs.map((tab) => (
+          <TerminalTabView
+            active={tab.id === activeTabId}
+            clearToken={tab.id === activeTabId ? clearToken : 0}
+            cwd={tab.cwd}
+            key={tab.id}
+            restartToken={tab.restartToken}
+            onStatusChange={(status) =>
+              updateTab(tab.id, (current) => ({ ...current, status }))
+            }
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface TerminalTabViewProps {
+  active: boolean;
+  clearToken: number;
+  cwd: string;
+  restartToken: number;
+  onStatusChange: (status: TerminalStatus) => void;
+}
+
+function TerminalTabView({
+  active,
+  clearToken,
+  cwd,
+  restartToken,
+  onStatusChange,
+}: TerminalTabViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
-  const [status, setStatus] = useState<string | null>("Starting");
-  const [restartToken, setRestartToken] = useState(0);
+  const onStatusChangeRef = useRef(onStatusChange);
+
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -89,7 +276,9 @@ export function TerminalPanel({
       }
     });
     const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
+      if (container.offsetParent !== null) {
+        fitAddon.fit();
+      }
     });
     resizeObserver.observe(container);
 
@@ -107,7 +296,7 @@ export function TerminalPanel({
 
         sessionIdRef.current = null;
         terminal.options.disableStdin = true;
-        setStatus("Exited");
+        onStatusChangeRef.current("exited");
 
         if (event.payload.message) {
           terminal.writeln(`\r\n${event.payload.message}`);
@@ -122,8 +311,6 @@ export function TerminalPanel({
         unlistenRef.current = unlisteners;
       }
     });
-
-    terminal.focus();
 
     return () => {
       disposed = true;
@@ -161,7 +348,7 @@ export function TerminalPanel({
 
     terminal.reset();
     terminal.options.disableStdin = true;
-    setStatus("Starting");
+    onStatusChangeRef.current("starting");
     fitAddon.fit();
 
     void startTerminalSession(cwd, terminal.cols, terminal.rows)
@@ -173,15 +360,14 @@ export function TerminalPanel({
 
         sessionIdRef.current = sessionId;
         terminal.options.disableStdin = false;
-        setStatus(null);
-        terminal.focus();
+        onStatusChangeRef.current("running");
       })
       .catch((error) => {
         if (cancelled) {
           return;
         }
 
-        setStatus("Failed");
+        onStatusChangeRef.current("failed");
         terminal.writeln(`Error: ${errorToMessage(error)}`);
       });
 
@@ -195,49 +381,37 @@ export function TerminalPanel({
     };
   }, [cwd, restartToken]);
 
-  const restartInActiveDirectory = () => {
-    if (activeDirectory === cwd) {
-      setRestartToken((current) => current + 1);
-    } else {
-      onCwdChange(activeDirectory);
+  useEffect(() => {
+    if (!active) {
+      return;
     }
-  };
 
-  const clearTerminal = () => {
-    terminalRef.current?.clear();
+    fitAddonRef.current?.fit();
     terminalRef.current?.focus();
-  };
+  }, [active]);
+
+  useEffect(() => {
+    if (clearToken > 0) {
+      terminalRef.current?.clear();
+      terminalRef.current?.focus();
+    }
+  }, [clearToken]);
 
   return (
-    <section className="terminal-panel" aria-label="Terminal">
-      <div className="terminal-header">
-        <div className="terminal-title">
-          <TerminalIcon size={16} />
-          <span>Terminal</span>
-        </div>
-        <div className="terminal-cwd" title={cwd}>
-          {displayPath(cwd)}
-          {status ? ` (${status})` : ""}
-        </div>
-        <div className="terminal-actions">
-          <IconButton
-            label={`Use active folder: ${displayPath(activeDirectory)}`}
-            onClick={restartInActiveDirectory}
-          >
-            <FolderSync size={16} />
-          </IconButton>
-          <IconButton label="Clear terminal" onClick={clearTerminal}>
-            <Trash2 size={16} />
-          </IconButton>
-          <IconButton label="Close terminal" onClick={onClose}>
-            <X size={16} />
-          </IconButton>
-        </div>
-      </div>
-
-      <div className="terminal-emulator" ref={containerRef} />
-    </section>
+    <div
+      className={`terminal-emulator ${active ? "active" : ""}`}
+      ref={containerRef}
+    />
   );
+}
+
+function createTerminalTab(cwd: string): TerminalTab {
+  return {
+    id: `terminal-tab-${Date.now()}-${nextTerminalTabId++}`,
+    cwd,
+    restartToken: 0,
+    status: "starting",
+  };
 }
 
 function errorToMessage(error: unknown): string {

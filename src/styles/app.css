@@ -494,7 +494,7 @@ body.terminal-resizing * {
 
 .terminal-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1.35fr) minmax(120px, 0.8fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 38px;
@@ -514,6 +514,80 @@ body.terminal-resizing * {
   color: #f2f6fb;
   font-size: 13px;
   font-weight: 650;
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.terminal-tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  height: 27px;
+  flex: 0 0 auto;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #aeb9c6;
+  cursor: default;
+}
+
+.terminal-tab-button span:not(.terminal-tab-status):not(.terminal-tab-close) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-tab-button.selected {
+  border-color: #34475b;
+  background: #223144;
+  color: #f2f6fb;
+}
+
+.terminal-tab-status {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #647386;
+}
+
+.terminal-tab-status.running {
+  background: #61d394;
+}
+
+.terminal-tab-status.starting {
+  background: #f2c15f;
+}
+
+.terminal-tab-status.exited,
+.terminal-tab-status.failed {
+  background: #ff8e8e;
+}
+
+.terminal-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  color: #8996a5;
+}
+
+.terminal-tab-close:hover {
+  background: #304256;
+  color: #ffffff;
 }
 
 .terminal-cwd {
@@ -536,11 +610,24 @@ body.terminal-resizing * {
   color: #ffffff;
 }
 
+.terminal-tab-views {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
 .terminal-emulator {
+  display: none;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   padding: 8px 10px;
   overflow: hidden;
+}
+
+.terminal-emulator.active {
+  display: block;
 }
 
 .terminal-emulator .xterm {
@@ -549,90 +636,6 @@ body.terminal-resizing * {
 
 .terminal-emulator .xterm-viewport {
   overflow-y: auto;
-}
-
-.terminal-output {
-  min-height: 0;
-  overflow: auto;
-  padding: 9px 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.terminal-empty,
-.terminal-running,
-.terminal-status {
-  color: #8393a5;
-}
-
-.terminal-entry + .terminal-entry {
-  margin-top: 9px;
-}
-
-.terminal-command-line {
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-  color: #edf5ff;
-}
-
-.terminal-prompt {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: #7fd3a5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.terminal-command {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.terminal-stream {
-  margin: 3px 0 0;
-  color: #d8e0ea;
-  font: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.terminal-stderr,
-.terminal-entry.failed .terminal-status {
-  color: #ff9d9d;
-}
-
-.terminal-input-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 5px 11px 7px;
-  border-top: 1px solid #24313e;
-  background: #121b26;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-}
-
-.terminal-input-prompt {
-  color: #7fd3a5;
-}
-
-.terminal-input-row input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: #f2f6fb;
-  font: inherit;
-}
-
-.terminal-input-row input::placeholder {
-  color: #68798b;
 }
 
 .context-menu {
