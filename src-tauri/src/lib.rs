@@ -924,6 +924,176 @@ fn current_timestamp_millis() -> u64 {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[cfg(unix)]
+    use std::os::unix::fs as unix_fs;
+
+    fn path_str(path: &Path) -> &str {
+        path.to_str().expect("temporary test path should be UTF-8")
+    }
+
+    fn write_file(path: &Path, contents: &str) {
+        fs::write(path, contents).expect("test file should be writable");
+    }
+
+    fn read_file(path: &Path) -> String {
+        fs::read_to_string(path).expect("test file should be readable")
+    }
+
+    #[test]
+    fn next_available_copy_name_adds_copy_suffixes() {
+        let temp = tempdir().unwrap();
+        let original = temp.path().join("report.txt");
+        let first_copy = temp.path().join("report copy.txt");
+
+        write_file(&original, "original");
+        assert_eq!(next_available_copy_name(&original), first_copy);
+
+        write_file(&first_copy, "copy");
+        assert_eq!(
+            next_available_copy_name(&original),
+            temp.path().join("report copy 2.txt")
+        );
+    }
+
+    #[test]
+    fn copy_one_renames_conflicting_file_without_overwriting() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("note.txt");
+        let destination_dir = temp.path().join("destination");
+        let existing = destination_dir.join("note.txt");
+        let renamed = destination_dir.join("note copy.txt");
+
+        fs::create_dir(&destination_dir).unwrap();
+        write_file(&source, "source");
+        write_file(&existing, "existing");
+
+        let result = copy_one(path_str(&source), &destination_dir, ConflictStrategy::Rename)
+            .expect("copy should succeed");
+
+        assert_eq!(result.status, "copied");
+        assert_eq!(result.destination, Some(path_to_string(renamed.clone())));
+        assert_eq!(read_file(&source), "source");
+        assert_eq!(read_file(&existing), "existing");
+        assert_eq!(read_file(&renamed), "source");
+    }
+
+    #[test]
+    fn copy_one_copies_directory_recursively() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("project");
+        let nested_file = source.join("src").join("main.rs");
+        let destination_dir = temp.path().join("destination");
+        let copied_file = destination_dir.join("project").join("src").join("main.rs");
+
+        fs::create_dir_all(nested_file.parent().unwrap()).unwrap();
+        fs::create_dir(&destination_dir).unwrap();
+        write_file(&nested_file, "fn main() {}");
+
+        let result = copy_one(path_str(&source), &destination_dir, ConflictStrategy::Rename)
+            .expect("directory copy should succeed");
+
+        assert_eq!(result.status, "copied");
+        assert_eq!(
+            result.destination,
+            Some(path_to_string(destination_dir.join("project")))
+        );
+        assert_eq!(read_file(&copied_file), "fn main() {}");
+    }
+
+    #[test]
+    fn move_one_skips_conflicting_file_when_requested() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("todo.txt");
+        let destination_dir = temp.path().join("destination");
+        let existing = destination_dir.join("todo.txt");
+
+        fs::create_dir(&destination_dir).unwrap();
+        write_file(&source, "source");
+        write_file(&existing, "existing");
+
+        let result = move_one(path_str(&source), &destination_dir, ConflictStrategy::Skip)
+            .expect("move skip should succeed");
+
+        assert_eq!(result.status, "skipped");
+        assert_eq!(result.destination, None);
+        assert_eq!(read_file(&source), "source");
+        assert_eq!(read_file(&existing), "existing");
+    }
+
+    #[test]
+    fn move_one_replaces_conflicting_file_when_requested() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("todo.txt");
+        let destination_dir = temp.path().join("destination");
+        let target = destination_dir.join("todo.txt");
+
+        fs::create_dir(&destination_dir).unwrap();
+        write_file(&source, "source");
+        write_file(&target, "existing");
+
+        let result = move_one(path_str(&source), &destination_dir, ConflictStrategy::Replace)
+            .expect("move replace should succeed");
+
+        assert_eq!(result.status, "moved");
+        assert_eq!(result.destination, Some(path_to_string(target.clone())));
+        assert!(!source.exists());
+        assert_eq!(read_file(&target), "source");
+    }
+
+    #[test]
+    fn remove_existing_removes_file_and_nested_directory() {
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("file.txt");
+        let directory = temp.path().join("directory");
+        let nested_file = directory.join("nested").join("file.txt");
+
+        write_file(&file, "file");
+        fs::create_dir_all(nested_file.parent().unwrap()).unwrap();
+        write_file(&nested_file, "nested");
+
+        remove_existing(&file).expect("file removal should succeed");
+        remove_existing(&directory).expect("directory removal should succeed");
+
+        assert!(!file.exists());
+        assert!(!directory.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_existing_removes_symlink_without_touching_target() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("target.txt");
+        let link = temp.path().join("target-link.txt");
+
+        write_file(&target, "target");
+        unix_fs::symlink(&target, &link).expect("symlink should be created");
+
+        remove_existing(&link).expect("symlink removal should succeed");
+
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert_eq!(read_file(&target), "target");
+    }
+
+    #[test]
+    fn prevent_copy_into_self_rejects_nested_destination() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("folder");
+        let nested_destination = source.join("child").join("folder");
+
+        fs::create_dir_all(nested_destination.parent().unwrap()).unwrap();
+
+        let error = prevent_copy_into_self(&source, &nested_destination)
+            .expect_err("copying into self should fail");
+
+        assert_eq!(error.kind, "invalid_destination");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

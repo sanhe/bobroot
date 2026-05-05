@@ -53,3 +53,7 @@ jobs:
       - name: Check Tauri crate
         run: cargo check
         working-directory: src-tauri
+
+      - name: Test Tauri crate
+        run: cargo test
+        working-directory: src-tauri
