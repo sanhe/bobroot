@@ -461,10 +461,9 @@ function TerminalTabView({
   }, [clearToken]);
 
   return (
-    <div
-      className={`terminal-emulator ${active ? "active" : ""}`}
-      ref={containerRef}
-    />
+    <div className={`terminal-emulator ${active ? "active" : ""}`}>
+      <div className="terminal-fit-area" ref={containerRef} />
+    </div>
   );
 }
 

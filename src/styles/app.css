@@ -594,7 +594,7 @@ body.terminal-resizing * {
 
 .terminal-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1.35fr) minmax(120px, 0.8fr) auto;
+  grid-template-columns: auto auto minmax(0, 1.35fr) minmax(120px, 0.8fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 38px;
@@ -608,6 +608,10 @@ body.terminal-resizing * {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.terminal-actions {
+  justify-self: end;
 }
 
 .terminal-title {
@@ -712,8 +716,10 @@ body.terminal-resizing * {
 
 .terminal-tab-views {
   position: relative;
+  display: grid;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .terminal-emulator {
@@ -727,14 +733,21 @@ body.terminal-resizing * {
 }
 
 .terminal-emulator.active {
-  display: block;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.terminal-emulator .xterm {
+.terminal-fit-area {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-fit-area .xterm {
   height: 100%;
 }
 
-.terminal-emulator .xterm-viewport {
+.terminal-fit-area .xterm-viewport {
   overflow-y: auto;
 }
 
