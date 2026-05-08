@@ -19,6 +19,10 @@ export async function listDirectory(
   return invoke("list_directory", { path, showHiddenFiles });
 }
 
+export async function watchDirectories(paths: string[]): Promise<string[]> {
+  return invoke("watch_directories", { paths });
+}
+
 export async function copyItems(
   items: string[],
   destinationDir: string,

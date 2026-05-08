@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   Copy,
   Eye,
@@ -29,6 +31,7 @@ import {
   revealPath,
   renameItem,
   saveSession,
+  watchDirectories,
 } from "./lib/api";
 import { basename } from "./lib/format";
 import {
@@ -99,6 +102,10 @@ interface ConflictStrategyRequest {
   mode: "copy" | "move";
 }
 
+interface DirectoryChangedPayload {
+  path: string;
+}
+
 function App() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [listings, setListings] = useState<ListingMap>({});
@@ -115,6 +122,10 @@ function App() {
   const [terminalCwd, setTerminalCwd] = useState<string | null>(null);
   const [terminalLiveSessionCount, setTerminalLiveSessionCount] = useState(0);
   const saveTimer = useRef<number | null>(null);
+  const refreshPanelRef = useRef<((panelId: PanelId) => Promise<void>) | null>(null);
+  const refreshTimers = useRef<Record<PanelId, number | null>>({ left: null, right: null });
+  const latestSession = useRef<SessionData | null>(null);
+  const latestListings = useRef<ListingMap>({});
   const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const conflictResolver = useRef<((strategy: ConflictStrategy | null) => void) | null>(null);
 
@@ -239,6 +250,78 @@ function App() {
 
     await Promise.all([refreshPanel("left"), refreshPanel("right")]);
   }, [refreshPanel, session]);
+
+  latestSession.current = session;
+  latestListings.current = listings;
+  refreshPanelRef.current = refreshPanel;
+
+  const watchedDirectoryKey = useMemo(
+    () => (session ? visiblePanelDirectories(session).join("\n") : ""),
+    [session],
+  );
+
+  useEffect(() => {
+    const paths = watchedDirectoryKey ? watchedDirectoryKey.split("\n") : [];
+    void watchDirectories(paths).catch((error) => {
+      reportNotice(errorToMessage(error));
+    });
+  }, [reportNotice, watchedDirectoryKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | null = null;
+
+    void listen<DirectoryChangedPayload>("directory-changed", (event) => {
+      const changedPath = normalizeDirectoryPath(event.payload.path);
+      const currentSession = latestSession.current;
+      if (!currentSession) {
+        return;
+      }
+
+      (["left", "right"] as PanelId[]).forEach((panelId) => {
+        if (panelId === "right" && !currentSession.visibility.right) {
+          return;
+        }
+
+        const tab = activeTab(currentSession[panelId]);
+        const panelPath = normalizeDirectoryPath(
+          latestListings.current[tab.id]?.path ?? tab.path,
+        );
+        if (panelPath !== changedPath) {
+          return;
+        }
+
+        const existingTimer = refreshTimers.current[panelId];
+        if (existingTimer !== null) {
+          window.clearTimeout(existingTimer);
+        }
+
+        refreshTimers.current[panelId] = window.setTimeout(() => {
+          refreshTimers.current[panelId] = null;
+          void refreshPanelRef.current?.(panelId);
+        }, 150);
+      });
+    }).then((dispose) => {
+      if (cancelled) {
+        dispose();
+      } else {
+        unlisten = dispose;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      (["left", "right"] as PanelId[]).forEach((panelId) => {
+        const timer = refreshTimers.current[panelId];
+        if (timer !== null) {
+          window.clearTimeout(timer);
+          refreshTimers.current[panelId] = null;
+        }
+      });
+      void watchDirectories([]).catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1747,6 +1830,24 @@ function pruneByKey<T>(
     }
   }
   return changed ? next : current;
+}
+
+function visiblePanelDirectories(session: SessionData): string[] {
+  const paths = [activeTab(session.left).path];
+  if (session.visibility.right) {
+    paths.push(activeTab(session.right).path);
+  }
+
+  return Array.from(new Set(paths.map(normalizeDirectoryPath)));
+}
+
+function normalizeDirectoryPath(path: string): string {
+  if (path === "/" || /^[A-Za-z]:[\\/]?$/.test(path)) {
+    return path;
+  }
+
+  const withoutTrailingSeparators = path.replace(/[\\/]+$/, "");
+  return withoutTrailingSeparators || path;
 }
 
 function nextNewFolderName(entries: FileEntry[]): string {

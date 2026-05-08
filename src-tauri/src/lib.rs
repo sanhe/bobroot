@@ -1,7 +1,8 @@
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::OsStr,
     fs,
     io::{self, Read, Write},
@@ -14,7 +15,7 @@ use std::{
     thread,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 type CommandResult<T> = Result<T, CommandError>;
 
@@ -177,6 +178,46 @@ struct TerminalExitPayload {
     message: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryChangedPayload {
+    path: String,
+}
+
+struct DirectoryWatcherState {
+    watcher: Mutex<Option<RecommendedWatcher>>,
+    watched_dirs: Arc<Mutex<HashSet<PathBuf>>>,
+    initialization_error: Option<String>,
+}
+
+impl DirectoryWatcherState {
+    fn new(app: AppHandle) -> Self {
+        let watched_dirs = Arc::new(Mutex::new(HashSet::new()));
+        let event_watched_dirs = Arc::clone(&watched_dirs);
+        let watcher_result = RecommendedWatcher::new(
+            move |result: notify::Result<Event>| {
+                if let Ok(event) = result {
+                    emit_directory_changed_events(&app, &event_watched_dirs, event.paths);
+                }
+            },
+            Config::default(),
+        );
+
+        match watcher_result {
+            Ok(watcher) => Self {
+                watcher: Mutex::new(Some(watcher)),
+                watched_dirs,
+                initialization_error: None,
+            },
+            Err(error) => Self {
+                watcher: Mutex::new(None),
+                watched_dirs,
+                initialization_error: Some(error.to_string()),
+            },
+        }
+    }
+}
+
 #[derive(Clone)]
 struct TerminalSessions {
     inner: Arc<TerminalSessionsInner>,
@@ -279,6 +320,44 @@ fn list_directory(path: String, show_hidden_files: bool) -> CommandResult<Direct
         show_hidden_files,
         entries,
     })
+}
+
+#[tauri::command]
+fn watch_directories(
+    state: State<'_, DirectoryWatcherState>,
+    paths: Vec<String>,
+) -> CommandResult<Vec<String>> {
+    if let Some(error) = &state.initialization_error {
+        return Err(CommandError::new("watch_failed", error.clone()));
+    }
+
+    let next_dirs = canonical_directory_set(paths)?;
+    let mut watcher_guard = state
+        .watcher
+        .lock()
+        .map_err(|_| CommandError::new("watcher_state", "Directory watcher is unavailable"))?;
+    let watcher = watcher_guard
+        .as_mut()
+        .ok_or_else(|| CommandError::new("watch_failed", "Directory watcher is unavailable"))?;
+    let mut watched_dirs = state
+        .watched_dirs
+        .lock()
+        .map_err(|_| CommandError::new("watcher_state", "Directory watcher is unavailable"))?;
+    let current_dirs = watched_dirs.clone();
+
+    for dir in current_dirs.difference(&next_dirs) {
+        let _ = watcher.unwatch(dir);
+    }
+
+    for dir in next_dirs.difference(&current_dirs) {
+        watcher
+            .watch(dir, RecursiveMode::NonRecursive)
+            .map_err(directory_watch_error)?;
+    }
+
+    *watched_dirs = next_dirs.clone();
+
+    Ok(next_dirs.into_iter().map(path_to_string).collect())
 }
 
 #[tauri::command]
@@ -1123,6 +1202,57 @@ fn resolve_existing_directory_path(path: &Path) -> CommandResult<PathBuf> {
     Ok(canonical)
 }
 
+fn canonical_directory_set(paths: Vec<String>) -> CommandResult<HashSet<PathBuf>> {
+    let mut dirs = HashSet::new();
+    for path in paths {
+        if path.trim().is_empty() {
+            continue;
+        }
+
+        dirs.insert(resolve_existing_directory(&path)?);
+    }
+    Ok(dirs)
+}
+
+fn emit_directory_changed_events(
+    app: &AppHandle,
+    watched_dirs: &Arc<Mutex<HashSet<PathBuf>>>,
+    event_paths: Vec<PathBuf>,
+) {
+    let watched_dirs = match watched_dirs.lock() {
+        Ok(paths) => paths.clone(),
+        Err(_) => return,
+    };
+    let mut changed_dirs = HashSet::new();
+
+    for event_path in event_paths {
+        let event_parent = event_path.parent();
+        let canonical_parent = event_parent.and_then(|parent| parent.canonicalize().ok());
+
+        for watched_dir in &watched_dirs {
+            if event_path == *watched_dir
+                || event_parent == Some(watched_dir.as_path())
+                || canonical_parent.as_deref() == Some(watched_dir.as_path())
+            {
+                changed_dirs.insert(watched_dir.clone());
+            }
+        }
+    }
+
+    for path in changed_dirs {
+        let _ = app.emit(
+            "directory-changed",
+            DirectoryChangedPayload {
+                path: path_to_string(path),
+            },
+        );
+    }
+}
+
+fn directory_watch_error(error: notify::Error) -> CommandError {
+    CommandError::new("watch_failed", error.to_string())
+}
+
 fn expand_terminal_path(target: &str, cwd: &Path) -> CommandResult<PathBuf> {
     if target == "~" {
         return dirs_next::home_dir()
@@ -1283,9 +1413,15 @@ fn current_timestamp_millis() -> u64 {
 pub fn run() {
     tauri::Builder::default()
         .manage(TerminalSessions::default())
+        .setup(|app| {
+            let directory_watcher = DirectoryWatcherState::new(app.handle().clone());
+            app.manage(directory_watcher);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             home_dir,
             list_directory,
+            watch_directories,
             copy_items,
             move_items,
             move_to_trash,
