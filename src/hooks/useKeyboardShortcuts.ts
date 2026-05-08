@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { currentPlatform } from "../lib/platform";
 
 interface ShortcutHandlers {
@@ -23,11 +23,23 @@ interface ShortcutHandlers {
   selectFirstRow: () => void;
   selectLastRow: () => void;
   openSelectedInNewTab: () => void;
+  openPathPrompt: () => void;
+  typeAhead: (prefix: string) => void;
 }
 
+const TYPE_AHEAD_RESET_MS = 700;
+
 export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true): void {
+  const typeAheadBufferRef = useRef("");
+  const typeAheadTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!enabled) {
+      typeAheadBufferRef.current = "";
+      if (typeAheadTimerRef.current !== null) {
+        window.clearTimeout(typeAheadTimerRef.current);
+        typeAheadTimerRef.current = null;
+      }
       return;
     }
 
@@ -51,6 +63,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
       const isAnyDelete = isBackspace || isForwardDelete;
       const isPeriod = key === "." || key === ">" || event.code === "Period";
       const isKeyC = lowerKey === "c" || event.code === "KeyC";
+      const isKeyL = lowerKey === "l" || event.code === "KeyL";
       const isKeyN = lowerKey === "n" || event.code === "KeyN";
       const isKeyS = lowerKey === "s" || event.code === "KeyS";
       const isBackquote = key === "`" || event.code === "Backquote";
@@ -149,6 +162,13 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
         event.preventDefault();
         event.stopPropagation();
         handlers.toggleTerminal();
+        return;
+      }
+
+      if (commandOrControl && !event.shiftKey && !event.altKey && isKeyL) {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.openPathPrompt();
         return;
       }
 
@@ -280,11 +300,38 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
       if (key === " " || key === "Spacebar") {
         event.preventDefault();
         handlers.previewSelected();
+        return;
+      }
+
+      if (
+        key.length === 1 &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        /^[\p{L}\p{N}._-]$/u.test(key)
+      ) {
+        event.preventDefault();
+        if (typeAheadTimerRef.current !== null) {
+          window.clearTimeout(typeAheadTimerRef.current);
+        }
+        typeAheadBufferRef.current += key.toLowerCase();
+        handlers.typeAhead(typeAheadBufferRef.current);
+        typeAheadTimerRef.current = window.setTimeout(() => {
+          typeAheadBufferRef.current = "";
+          typeAheadTimerRef.current = null;
+        }, TYPE_AHEAD_RESET_MS);
       }
     };
 
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (typeAheadTimerRef.current !== null) {
+        window.clearTimeout(typeAheadTimerRef.current);
+        typeAheadTimerRef.current = null;
+      }
+      typeAheadBufferRef.current = "";
+    };
   }, [enabled, handlers]);
 }
 

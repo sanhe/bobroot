@@ -129,6 +129,8 @@ Tauri writes release artifacts under `src-tauri/target/release/bundle`.
 - Copy selected path(s): `Cmd+Option+C` on macOS, `Ctrl+Shift+C` on Linux and Windows
 - Insert path(s) into a terminal by drag and drop: `Cmd+Drag` on macOS, `Ctrl+Drag` on Linux and Windows
 - Toggle bottom terminal: `Cmd+\`` on macOS, `Ctrl+\`` on Linux and Windows
+- Go to folder by path (with Tab autocomplete): `Cmd+L` on macOS, `Ctrl+L` on Linux and Windows
+- Type-ahead jump to entry: start typing letters/digits in the active panel to jump to the first matching entry
 - Create folder: `Cmd+Shift+N` on macOS, `Ctrl+Shift+N` on Linux and Windows
 - Switch active panel: `Tab`
 - Match active panel to the opposite panel folder: `Cmd+Option+S` on macOS, `Ctrl+Alt+S` on Linux and Windows

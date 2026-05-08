@@ -746,6 +746,78 @@ body.terminal-resizing * {
   background: #b83232;
 }
 
+.path-prompt-dialog {
+  width: min(560px, 100%);
+  padding: 16px;
+  border: 1px solid #cdd3dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 22px 48px rgba(23, 31, 42, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.path-prompt-dialog h2 {
+  margin: 0;
+  color: #1d1d1f;
+  font-size: 16px;
+  font-weight: 680;
+}
+
+.path-prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #cdd3dc;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #252a31;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.path-prompt-input:focus {
+  outline: 2px solid #2f7dd1;
+  outline-offset: 1px;
+}
+
+.path-prompt-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #e1e5eb;
+  border-radius: 6px;
+  background: #fbfbfc;
+}
+
+.path-prompt-suggestion {
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #2c3138;
+  cursor: default;
+}
+
+.path-prompt-suggestion.highlighted {
+  background: #2f7dd1;
+  color: #ffffff;
+}
+
+.path-prompt-error {
+  margin: 0;
+  color: #b3261e;
+  font-size: 12px;
+}
+
+.path-prompt-hint {
+  margin: 0;
+  color: #6b727b;
+  font-size: 11px;
+}
+
 @media (max-width: 1050px) {
   .global-actions .icon-button.with-label {
     min-width: 34px;

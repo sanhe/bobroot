@@ -72,6 +72,7 @@ import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { FilePanel } from "./components/FilePanel";
 import { IconButton } from "./components/IconButton";
+import { PathPrompt } from "./components/PathPrompt";
 import { TerminalPanel, type TerminalCloseScope } from "./components/TerminalPanel";
 
 type ListingMap = Record<string, DirectoryListing | null>;
@@ -119,6 +120,10 @@ function App() {
   const [renameState, setRenameState] = useState<RenameState | null>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
   const [conflictRequest, setConflictRequest] = useState<ConflictStrategyRequest | null>(null);
+  const [pathPrompt, setPathPrompt] = useState<{
+    initialValue: string;
+    panelId: PanelId;
+  } | null>(null);
   const [terminalCwd, setTerminalCwd] = useState<string | null>(null);
   const [terminalLiveSessionCount, setTerminalLiveSessionCount] = useState(0);
   const saveTimer = useRef<number | null>(null);
@@ -690,6 +695,40 @@ function App() {
     );
   }, [recordAction]);
 
+  const openPathPrompt = useCallback(() => {
+    if (!session) {
+      return;
+    }
+    const panelId = session.activePanel;
+    const tab = activeTab(session[panelId]);
+    const separator = tab.path.includes("\\") && !tab.path.includes("/") ? "\\" : "/";
+    const initialValue =
+      tab.path.endsWith("/") || tab.path.endsWith("\\")
+        ? tab.path
+        : tab.path + separator;
+    recordAction("open_path_prompt", { panelId });
+    setPathPrompt({ initialValue, panelId });
+  }, [recordAction, session]);
+
+  const closePathPrompt = useCallback(() => {
+    setPathPrompt(null);
+  }, []);
+
+  const navigateFromPathPrompt = useCallback(
+    (path: string) => {
+      if (!pathPrompt) {
+        return;
+      }
+      const target = path.trim();
+      setPathPrompt(null);
+      if (!target) {
+        return;
+      }
+      navigateTo(pathPrompt.panelId, target);
+    },
+    [navigateTo, pathPrompt],
+  );
+
   const goParent = useCallback((panelId = activePanelId) => {
     recordAction("go_parent", { panelId });
     if (!session) {
@@ -775,6 +814,28 @@ function App() {
       );
     },
     [listings, recordAction, session],
+  );
+
+  const typeAheadSelect = useCallback(
+    (prefix: string) => {
+      if (!session || !prefix) {
+        return;
+      }
+      const panelId = session.activePanel;
+      const tab = activeTab(session[panelId]);
+      const entries = listings[tab.id]?.entries ?? [];
+      if (entries.length === 0) {
+        return;
+      }
+      const lowered = prefix.toLowerCase();
+      const index = entries.findIndex((entry) =>
+        entry.name.toLowerCase().startsWith(lowered),
+      );
+      if (index >= 0) {
+        selectEntryByIndex(index);
+      }
+    },
+    [listings, selectEntryByIndex, session],
   );
 
   const moveSelection = useCallback(
@@ -1334,6 +1395,8 @@ function App() {
       selectFirstRow,
       selectLastRow,
       openSelectedInNewTab,
+      openPathPrompt,
+      typeAhead: typeAheadSelect,
     }),
     [
       closeTab,
@@ -1342,6 +1405,7 @@ function App() {
       deleteSelectedPermanently,
       goParent,
       newTab,
+      openPathPrompt,
       openSelected,
       openSelectedInNewTab,
       previewSelected,
@@ -1356,11 +1420,14 @@ function App() {
       toggleHiddenFiles,
       toggleTerminal,
       trashSelected,
+      typeAheadSelect,
     ],
   );
   useKeyboardShortcuts(
     shortcutHandlers,
-    confirmation === null && conflictRequest === null,
+    confirmation === null &&
+      conflictRequest === null &&
+      pathPrompt === null,
   );
 
   if (!session) {
@@ -1684,6 +1751,13 @@ function App() {
             </div>
           </div>
         </div>
+      ) : null}
+      {pathPrompt ? (
+        <PathPrompt
+          initialValue={pathPrompt.initialValue}
+          onCancel={closePathPrompt}
+          onNavigate={navigateFromPathPrompt}
+        />
       ) : null}
       {conflictRequest ? (
         <div
