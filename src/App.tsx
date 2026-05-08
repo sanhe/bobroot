@@ -106,6 +106,10 @@ interface ConfirmationState {
   destructive?: boolean;
 }
 
+interface ConflictStrategyRequest {
+  mode: "copy" | "move";
+}
+
 function App() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [listings, setListings] = useState<ListingMap>({});
@@ -114,10 +118,12 @@ function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renameState, setRenameState] = useState<RenameState | null>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
+  const [conflictRequest, setConflictRequest] = useState<ConflictStrategyRequest | null>(null);
   const [terminalCwd, setTerminalCwd] = useState<string | null>(null);
   const [terminalLiveSessionCount, setTerminalLiveSessionCount] = useState(0);
   const saveTimer = useRef<number | null>(null);
   const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
+  const conflictResolver = useRef<((strategy: ConflictStrategy | null) => void) | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const panelsRef = useRef<HTMLDivElement>(null);
 
@@ -165,10 +171,28 @@ function App() {
     resolver?.(confirmed);
   }, []);
 
+  const requestConflictStrategy = useCallback((mode: "copy" | "move") => {
+    conflictResolver.current?.(null);
+    setConflictRequest({ mode });
+
+    return new Promise<ConflictStrategy | null>((resolve) => {
+      conflictResolver.current = resolve;
+    });
+  }, []);
+
+  const resolveConflictStrategy = useCallback((strategy: ConflictStrategy | null) => {
+    const resolver = conflictResolver.current;
+    conflictResolver.current = null;
+    setConflictRequest(null);
+    resolver?.(strategy);
+  }, []);
+
   useEffect(
     () => () => {
       confirmationResolver.current?.(false);
       confirmationResolver.current = null;
+      conflictResolver.current?.(null);
+      conflictResolver.current = null;
     },
     [],
   );
@@ -266,30 +290,43 @@ function App() {
     };
   }, [reportNotice]);
 
+  const leftActiveTab = session ? activeTab(session.left) : null;
+  const rightActiveTab = session ? activeTab(session.right) : null;
+  const rightPanelVisibleForLoad = session?.rightPanelVisible ?? false;
+  const leftActiveTabId = leftActiveTab?.id ?? null;
+  const leftActiveTabPath = leftActiveTab?.path ?? null;
+  const rightActiveTabId = rightActiveTab?.id ?? null;
+  const rightActiveTabPath = rightActiveTab?.path ?? null;
+
+  useEffect(() => {
+    if (leftActiveTab) {
+      void loadTab("left", leftActiveTab);
+    }
+    if (rightPanelVisibleForLoad && rightActiveTab) {
+      void loadTab("right", rightActiveTab);
+    }
+  }, [
+    loadTab,
+    rightPanelVisibleForLoad,
+    leftActiveTabId,
+    leftActiveTabPath,
+    rightActiveTabId,
+    rightActiveTabPath,
+  ]);
+
   useEffect(() => {
     if (!session) {
       return;
     }
 
-    const visibleTabs: Array<[PanelId, TabState]> = [
-      ["left", activeTab(session.left)],
-    ];
-    if (session.rightPanelVisible) {
-      visibleTabs.push(["right", activeTab(session.right)]);
-    }
+    const validIds = new Set<string>([
+      ...session.left.tabs.map((tab) => tab.id),
+      ...session.right.tabs.map((tab) => tab.id),
+    ]);
 
-    for (const [panelId, tab] of visibleTabs) {
-      void loadTab(panelId, tab);
-    }
-  }, [
-    loadTab,
-    session?.left.activeTabId,
-    session?.right.activeTabId,
-    session?.rightPanelVisible,
-    session?.showHiddenFiles,
-    session?.left.tabs,
-    session?.right.tabs,
-  ]);
+    setListings((current) => pruneByKey(current, validIds));
+    setLoading((current) => pruneByKey(current, validIds));
+  }, [session?.left.tabs, session?.right.tabs]);
 
   const persistSession = useCallback(
     async (current: SessionData) => {
@@ -1005,7 +1042,7 @@ function App() {
         return;
       }
 
-      const strategy = askConflictStrategy(mode);
+      const strategy = await requestConflictStrategy(mode);
       if (!strategy) {
         recordAction("transfer_cancelled", { mode, reason: "no_conflict_strategy" });
         return;
@@ -1040,7 +1077,7 @@ function App() {
         reportNotice(errorToMessage(error));
       }
     },
-    [listings, recordAction, refreshVisiblePanels, reportNotice, session],
+    [listings, recordAction, refreshVisiblePanels, reportNotice, requestConflictStrategy, session],
   );
 
   const trashSelected = useCallback(async () => {
@@ -1321,7 +1358,10 @@ function App() {
       trashSelected,
     ],
   );
-  useKeyboardShortcuts(shortcutHandlers, confirmation === null);
+  useKeyboardShortcuts(
+    shortcutHandlers,
+    confirmation === null && conflictRequest === null,
+  );
 
   if (!session) {
     return (
@@ -1645,6 +1685,64 @@ function App() {
           </div>
         </div>
       ) : null}
+      {conflictRequest ? (
+        <div
+          className="confirmation-overlay"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              resolveConflictStrategy(null);
+            }
+          }}
+          role="presentation"
+        >
+          <div
+            aria-modal="true"
+            className="confirmation-dialog"
+            role="dialog"
+            aria-labelledby="conflict-title"
+            aria-describedby="conflict-message"
+          >
+            <h2 id="conflict-title">
+              {conflictRequest.mode === "copy" ? "Copy items" : "Move items"}
+            </h2>
+            <p id="conflict-message">
+              When an item already exists at the destination, what should Bobroot do?
+            </p>
+            <div className="confirmation-actions">
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => resolveConflictStrategy(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => resolveConflictStrategy("skip")}
+              >
+                Skip
+              </button>
+              <button
+                className="destructive-action"
+                type="button"
+                onClick={() => resolveConflictStrategy("replace")}
+              >
+                Replace
+              </button>
+              <button
+                autoFocus
+                className="primary-action"
+                type="button"
+                onClick={() => resolveConflictStrategy("rename")}
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -1800,25 +1898,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function askConflictStrategy(mode: "copy" | "move"): ConflictStrategy | null {
-  const answer = window
-    .prompt(
-      `${mode === "copy" ? "Copy" : "Move"} conflict handling: replace, skip, or rename with suffix`,
-      "rename",
-    )
-    ?.trim()
-    .toLowerCase();
-
-  if (!answer) {
-    return null;
+function pruneByKey<T>(
+  current: Record<string, T>,
+  validKeys: Set<string>,
+): Record<string, T> {
+  const next: Record<string, T> = {};
+  let changed = false;
+  for (const [key, value] of Object.entries(current)) {
+    if (validKeys.has(key)) {
+      next[key] = value;
+    } else {
+      changed = true;
+    }
   }
-
-  if (answer === "replace" || answer === "skip" || answer === "rename") {
-    return answer;
-  }
-
-  window.alert("Use replace, skip, or rename.");
-  return null;
+  return changed ? next : current;
 }
 
 function nextNewFolderName(entries: FileEntry[]): string {

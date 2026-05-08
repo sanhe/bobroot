@@ -685,6 +685,8 @@ fn save_session(session: SessionData) -> CommandResult<()> {
     Ok(())
 }
 
+const ACTION_LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
 #[tauri::command]
 fn append_action_log(action: String, details: serde_json::Value) -> CommandResult<()> {
     let action = action.trim();
@@ -700,6 +702,8 @@ fn append_action_log(action: String, details: serde_json::Value) -> CommandResul
         fs::create_dir_all(parent)?;
     }
 
+    rotate_action_log_if_needed(&path)?;
+
     let line = ActionLogLine {
         timestamp: current_timestamp_millis(),
         action: action.to_string(),
@@ -711,6 +715,30 @@ fn append_action_log(action: String, details: serde_json::Value) -> CommandResul
         .open(path)?;
     serde_json::to_writer(&mut file, &line)?;
     file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn rotate_action_log_if_needed(path: &Path) -> CommandResult<()> {
+    let size = match fs::metadata(path) {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    if size < ACTION_LOG_MAX_BYTES {
+        return Ok(());
+    }
+
+    let rotated = path.with_file_name(format!(
+        "{}.1",
+        path.file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("actions.jsonl"),
+    ));
+    if rotated.exists() {
+        let _ = fs::remove_file(&rotated);
+    }
+    fs::rename(path, &rotated)?;
     Ok(())
 }
 
@@ -798,20 +826,13 @@ fn move_one(
         remove_existing(&target.path)?;
     }
 
-    match fs::rename(&source, &target.path) {
-        Ok(()) => {}
-        Err(rename_error) => {
-            if metadata.is_dir() {
-                copy_dir_recursive(&source, &target.path)?;
-                fs::remove_dir_all(&source)?;
-            } else {
-                fs::copy(&source, &target.path)?;
-                fs::remove_file(&source)?;
-            }
-
-            if target.path.exists() {
-                let _ = rename_error;
-            }
+    if fs::rename(&source, &target.path).is_err() {
+        if metadata.is_dir() {
+            copy_dir_recursive(&source, &target.path)?;
+            fs::remove_dir_all(&source)?;
+        } else {
+            fs::copy(&source, &target.path)?;
+            fs::remove_file(&source)?;
         }
     }
 
@@ -893,18 +914,9 @@ fn copy_symlink_platform(_source: &Path, target: &Path, link_target: &Path) -> C
 
 #[cfg(windows)]
 fn copy_symlink_platform(source: &Path, target: &Path, link_target: &Path) -> CommandResult<()> {
-    let target_metadata = fs::metadata(source).map_err(|error| {
-        CommandError::new(
-            "unsupported",
-            format!(
-                "Could not inspect symlink target '{}': {}",
-                source.display(),
-                error
-            ),
-        )
-    })?;
+    let is_dir = fs::metadata(source).map(|meta| meta.is_dir()).unwrap_or(false);
 
-    if target_metadata.is_dir() {
+    if is_dir {
         std::os::windows::fs::symlink_dir(link_target, target)?;
     } else {
         std::os::windows::fs::symlink_file(link_target, target)?;
@@ -1074,7 +1086,12 @@ fn ensure_directory(path: &Path) -> CommandResult<()> {
 }
 
 fn is_valid_entry_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains('/') && !name.contains('\\')
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains('\0')
 }
 
 fn resolve_existing_directory(path: &str) -> CommandResult<PathBuf> {
@@ -1552,5 +1569,8 @@ mod tests {
         assert!(!is_valid_entry_name(""));
         assert!(!is_valid_entry_name("nested/name"));
         assert!(!is_valid_entry_name("nested\\name"));
+        assert!(!is_valid_entry_name("."));
+        assert!(!is_valid_entry_name(".."));
+        assert!(!is_valid_entry_name("name\0withnull"));
     }
 }
