@@ -5,6 +5,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
   FolderSync,
+  GripVertical,
   Plus,
   Terminal as TerminalIcon,
   Trash2,
@@ -19,6 +20,7 @@ import {
 } from "../lib/api";
 import { basename, displayPath } from "../lib/format";
 import { IconButton } from "./IconButton";
+import type { LayoutDragHandlers } from "./Layout";
 
 export type TerminalCloseScope = "panel" | "tab";
 
@@ -29,6 +31,7 @@ interface TerminalPanelProps {
   onClose: () => void;
   onBeforeClose: (scope: TerminalCloseScope, runningCount: number) => Promise<boolean>;
   onLiveSessionCountChange: (count: number) => void;
+  dragHandlers: LayoutDragHandlers;
 }
 
 interface TerminalOutputPayload {
@@ -60,6 +63,7 @@ export function TerminalPanel({
   onClose,
   onBeforeClose,
   onLiveSessionCountChange,
+  dragHandlers,
 }: TerminalPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [createTerminalTab(cwd)]);
   const [activeTabId, setActiveTabId] = useState(() => tabs[0]?.id ?? "");
@@ -183,6 +187,15 @@ export function TerminalPanel({
   return (
     <section className="terminal-panel" aria-label="Terminal">
       <div className="terminal-header">
+        <button
+          aria-label="Move panel"
+          className="layout-drag-handle"
+          onPointerDown={dragHandlers.onPointerDown}
+          title="Drag to move this panel"
+          type="button"
+        >
+          <GripVertical size={14} />
+        </button>
         <div className="terminal-title">
           <TerminalIcon size={16} />
           <span>Terminal</span>

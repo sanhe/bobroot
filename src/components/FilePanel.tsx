@@ -4,6 +4,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  GripVertical,
   HardDrive,
   Plus,
   RefreshCw,
@@ -16,6 +17,7 @@ import type { AppPlatform } from "../lib/platform";
 import type { DirectoryListing, FileEntry, PanelId, PanelState } from "../lib/types";
 import { activeTab } from "../lib/tabState";
 import { IconButton } from "./IconButton";
+import type { LayoutDragHandlers } from "./Layout";
 
 interface FilePanelProps {
   panelId: PanelId;
@@ -49,6 +51,7 @@ interface FilePanelProps {
   onRenameChange: (name: string) => void;
   onRenameCommit: () => void;
   onRenameCancel: () => void;
+  dragHandlers: LayoutDragHandlers;
 }
 
 export function FilePanel({
@@ -75,6 +78,7 @@ export function FilePanel({
   onRenameChange,
   onRenameCommit,
   onRenameCancel,
+  dragHandlers,
 }: FilePanelProps) {
   const tab = activeTab(panel);
   const selected = new Set(tab.selectedPaths);
@@ -98,6 +102,15 @@ export function FilePanel({
       onMouseDown={() => onActivate(panelId)}
     >
       <div className="tab-strip" role="tablist" aria-label={`${panelId} panel tabs`}>
+        <button
+          aria-label="Move panel"
+          className="layout-drag-handle"
+          onPointerDown={dragHandlers.onPointerDown}
+          title="Drag to move this panel"
+          type="button"
+        >
+          <GripVertical size={14} />
+        </button>
         {panel.tabs.map((panelTab) => (
           <button
             className={`tab-button ${panelTab.id === panel.activeTabId ? "selected" : ""}`}

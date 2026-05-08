@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { DragEvent } from "react";
 import {
   Copy,
   Eye,
@@ -33,19 +33,13 @@ import {
 import { basename } from "./lib/format";
 import {
   activeTab,
-  clampPanelSplit,
-  clampTerminalHeight,
   createPanel,
   createTab,
-  DEFAULT_PANEL_SPLIT,
-  DEFAULT_TERMINAL_HEIGHT,
-  MAX_PANEL_SPLIT,
-  MIN_PANEL_SPLIT,
-  MIN_TERMINAL_HEIGHT,
   navigateTab,
   normalizeSession,
   oppositePanel,
 } from "./lib/tabState";
+import { defaultLayout } from "./lib/layout";
 import {
   currentPlatform,
   copyPathShortcut,
@@ -63,7 +57,9 @@ import type {
   ConflictStrategy,
   DirectoryListing,
   FileEntry,
+  LayoutNode,
   PanelId,
+  PanelRef,
   PanelState,
   SessionData,
   TabState,
@@ -72,20 +68,12 @@ import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { FilePanel } from "./components/FilePanel";
 import { IconButton } from "./components/IconButton";
+import { Layout, type LayoutDragHandlers } from "./components/Layout";
 import { PathPrompt } from "./components/PathPrompt";
 import { TerminalPanel, type TerminalCloseScope } from "./components/TerminalPanel";
 
 type ListingMap = Record<string, DirectoryListing | null>;
 type LoadingMap = Record<string, boolean>;
-const WORKSPACE_PADDING = 12;
-const TERMINAL_RESIZE_HANDLE_HEIGHT = 8;
-const TERMINAL_RESIZE_ROW_GAPS = 8;
-const MIN_PANELS_HEIGHT = 220;
-const TERMINAL_RESIZE_STEP = 24;
-const PANEL_RESIZE_HANDLE_WIDTH = 8;
-const PANEL_RESIZE_ROW_GAPS = 8;
-const MIN_FILE_PANEL_WIDTH = 320;
-const PANEL_RESIZE_STEP = 0.04;
 
 interface ContextMenuState {
   panelId: PanelId;
@@ -129,8 +117,6 @@ function App() {
   const saveTimer = useRef<number | null>(null);
   const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const conflictResolver = useRef<((strategy: ConflictStrategy | null) => void) | null>(null);
-  const workspaceRef = useRef<HTMLDivElement>(null);
-  const panelsRef = useRef<HTMLDivElement>(null);
 
   const platform = useMemo(() => currentPlatform(), []);
   const hiddenShortcut = useMemo(() => hiddenFilesShortcut(platform), [platform]);
@@ -143,10 +129,8 @@ function App() {
   const permanentShortcut = useMemo(() => permanentDeleteShortcut(platform), [platform]);
   const revealLabel = useMemo(() => revealActionLabel(platform), [platform]);
   const activePanelId = session?.activePanel ?? "left";
-  const rightPanelVisible = session?.rightPanelVisible ?? true;
-  const panelSplit = session?.panelSplit ?? DEFAULT_PANEL_SPLIT;
-  const terminalVisible = session?.terminalVisible ?? false;
-  const terminalHeight = session?.terminalHeight ?? DEFAULT_TERMINAL_HEIGHT;
+  const rightPanelVisible = session?.visibility.right ?? true;
+  const terminalVisible = session?.visibility.terminal ?? false;
   const showHiddenFiles = session?.showHiddenFiles ?? false;
 
   const reportNotice = useCallback((message: string | null) => {
@@ -267,19 +251,17 @@ function App() {
           return;
         }
 
-        const initialSession = saved
-            ? normalizeSession(saved, home)
-            : {
-                left: createPanel(home),
-                right: createPanel(home),
-                activePanel: "left" as const,
-                rightPanelVisible: true,
-                panelSplit: DEFAULT_PANEL_SPLIT,
-                terminalVisible: false,
-                terminalHeight: DEFAULT_TERMINAL_HEIGHT,
-                showHiddenFiles: false,
-                window: null,
-              };
+        const initialSession: SessionData = saved
+          ? normalizeSession(saved, home)
+          : {
+              left: createPanel(home),
+              right: createPanel(home),
+              activePanel: "left",
+              showHiddenFiles: false,
+              layout: defaultLayout(),
+              visibility: { left: true, right: true, terminal: false },
+              window: null,
+            };
 
         setSession(initialSession);
         setTerminalCwd(activeTab(initialSession[initialSession.activePanel]).path);
@@ -297,7 +279,7 @@ function App() {
 
   const leftActiveTab = session ? activeTab(session.left) : null;
   const rightActiveTab = session ? activeTab(session.right) : null;
-  const rightPanelVisibleForLoad = session?.rightPanelVisible ?? false;
+  const rightPanelVisibleForLoad = session?.visibility.right ?? false;
   const leftActiveTabId = leftActiveTab?.id ?? null;
   const leftActiveTabPath = leftActiveTab?.path ?? null;
   const rightActiveTabId = rightActiveTab?.id ?? null;
@@ -389,7 +371,7 @@ function App() {
   const setActivePanel = useCallback((panelId: PanelId) => {
     recordAction("activate_panel", { panelId });
     setSession((previous) =>
-      previous && (panelId === "left" || previous.rightPanelVisible)
+      previous && (panelId === "left" || previous.visibility.right)
         ? { ...previous, activePanel: panelId }
         : previous,
     );
@@ -401,7 +383,7 @@ function App() {
       previous
         ? {
             ...previous,
-            activePanel: previous.rightPanelVisible
+            activePanel: previous.visibility.right
               ? oppositePanel(previous.activePanel)
               : "left",
           }
@@ -479,11 +461,11 @@ function App() {
         return previous;
       }
 
-      const nextVisible = !previous.rightPanelVisible;
+      const nextVisible = !previous.visibility.right;
       return {
         ...previous,
         activePanel: nextVisible ? previous.activePanel : "left",
-        rightPanelVisible: nextVisible,
+        visibility: { ...previous.visibility, right: nextVisible },
       };
     });
   }, [recordAction, rightPanelVisible]);
@@ -508,7 +490,7 @@ function App() {
       return;
     }
 
-    const nextVisible = !session.terminalVisible;
+    const nextVisible = !session.visibility.terminal;
     if (!nextVisible && terminalLiveSessionCount > 0) {
       const confirmed = await confirmTerminalClose("panel", terminalLiveSessionCount);
       if (!confirmed) {
@@ -532,7 +514,7 @@ function App() {
       previous
         ? {
             ...previous,
-            terminalVisible: !previous.terminalVisible,
+            visibility: { ...previous.visibility, terminal: nextVisible },
           }
         : previous,
     );
@@ -545,145 +527,20 @@ function App() {
       previous
         ? {
             ...previous,
-            terminalVisible: false,
+            visibility: { ...previous.visibility, terminal: false },
           }
         : previous,
     );
   }, [recordAction]);
 
-  const getPanelSplitBounds = useCallback(() => {
-    const panels = panelsRef.current;
-    if (!panels) {
-      return {
-        min: MIN_PANEL_SPLIT,
-        max: MAX_PANEL_SPLIT,
-      };
-    }
-
-    const bounds = panels.getBoundingClientRect();
-    const usableWidth = bounds.width - PANEL_RESIZE_HANDLE_WIDTH - PANEL_RESIZE_ROW_GAPS;
-    const minByWidth = MIN_FILE_PANEL_WIDTH / Math.max(usableWidth, 1);
-    const min = Math.min(0.45, Math.max(MIN_PANEL_SPLIT, minByWidth));
-    return {
-      min,
-      max: 1 - min,
-    };
-  }, []);
-
-  const setPanelSplit = useCallback(
-    (split: number) => {
-      const bounds = getPanelSplitBounds();
+  const setLayout = useCallback(
+    (next: LayoutNode) => {
+      recordAction("update_layout");
       setSession((previous) =>
-        previous
-          ? {
-              ...previous,
-              panelSplit: clampPanelSplit(split, bounds.min, bounds.max),
-            }
-          : previous,
+        previous ? { ...previous, layout: next } : previous,
       );
     },
-    [getPanelSplitBounds],
-  );
-
-  const beginPanelResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      setContextMenu(null);
-      setRenameState(null);
-      document.body.classList.add("panel-resizing");
-
-      const resizeToPointer = (clientX: number) => {
-        const panels = panelsRef.current;
-        if (!panels) {
-          return;
-        }
-
-        const bounds = panels.getBoundingClientRect();
-        setPanelSplit((clientX - bounds.left) / Math.max(bounds.width, 1));
-      };
-
-      const onPointerMove = (moveEvent: PointerEvent) => {
-        resizeToPointer(moveEvent.clientX);
-      };
-
-      const onPointerUp = () => {
-        document.body.classList.remove("panel-resizing");
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        recordAction("resize_file_panels");
-      };
-
-      resizeToPointer(event.clientX);
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp, { once: true });
-    },
-    [recordAction, setPanelSplit],
-  );
-
-  const getTerminalMaxHeight = useCallback(() => {
-    const workspace = workspaceRef.current;
-    if (!workspace) {
-      return undefined;
-    }
-
-    const bounds = workspace.getBoundingClientRect();
-    const contentHeight = bounds.height - WORKSPACE_PADDING * 2;
-    return (
-      contentHeight -
-      MIN_PANELS_HEIGHT -
-      TERMINAL_RESIZE_HANDLE_HEIGHT -
-      TERMINAL_RESIZE_ROW_GAPS
-    );
-  }, []);
-
-  const setTerminalHeight = useCallback(
-    (height: number, maximum = getTerminalMaxHeight()) => {
-      setSession((previous) =>
-        previous
-          ? {
-              ...previous,
-              terminalHeight: clampTerminalHeight(height, maximum),
-            }
-          : previous,
-      );
-    },
-    [getTerminalMaxHeight],
-  );
-
-  const beginTerminalResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      setContextMenu(null);
-      setRenameState(null);
-      document.body.classList.add("terminal-resizing");
-
-      const resizeToPointer = (clientY: number) => {
-        const workspace = workspaceRef.current;
-        if (!workspace) {
-          return;
-        }
-
-        const bounds = workspace.getBoundingClientRect();
-        const contentBottom = bounds.bottom - WORKSPACE_PADDING;
-        setTerminalHeight(contentBottom - clientY);
-      };
-
-      const onPointerMove = (moveEvent: PointerEvent) => {
-        resizeToPointer(moveEvent.clientY);
-      };
-
-      const onPointerUp = () => {
-        document.body.classList.remove("terminal-resizing");
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        recordAction("resize_terminal");
-      };
-
-      resizeToPointer(event.clientY);
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp, { once: true });
-    },
-    [recordAction, setTerminalHeight],
+    [recordAction],
   );
 
   const navigateTo = useCallback((panelId: PanelId, path: string) => {
@@ -748,7 +605,7 @@ function App() {
       return;
     }
 
-    if (!session.rightPanelVisible) {
+    if (!session.visibility.right) {
       reportNotice("Show the right panel to match folders between panels.");
       return;
     }
@@ -1087,7 +944,7 @@ function App() {
         return;
       }
 
-      if (!session.rightPanelVisible) {
+      if (!session.visibility.right) {
         reportNotice("Show the right panel to copy or move between panels.");
         return;
       }
@@ -1440,17 +1297,54 @@ function App() {
 
   const activeDirectory = activeTab(session[session.activePanel]).path;
   const currentTerminalCwd = terminalCwd ?? activeDirectory;
-  const workspaceStyle = terminalVisible
-    ? ({
-        "--terminal-height": `${terminalHeight}px`,
-      } as CSSProperties)
-    : undefined;
-  const panelsStyle = rightPanelVisible
-    ? ({
-        "--left-panel-fr": `${panelSplit}fr`,
-        "--right-panel-fr": `${1 - panelSplit}fr`,
-      } as CSSProperties)
-    : undefined;
+
+  const renderPanel = (ref: PanelRef, dragHandlers: LayoutDragHandlers) => {
+    if (ref === "terminal") {
+      return (
+        <TerminalPanel
+          activeDirectory={activeDirectory}
+          cwd={currentTerminalCwd}
+          dragHandlers={dragHandlers}
+          onBeforeClose={confirmTerminalClose}
+          onClose={closeTerminal}
+          onCwdChange={setTerminalCwd}
+          onLiveSessionCountChange={setTerminalLiveSessionCount}
+        />
+      );
+    }
+    const panelId: PanelId = ref;
+    const panelState = session[panelId];
+    return (
+      <FilePanel
+        dragHandlers={dragHandlers}
+        isActive={session.activePanel === panelId}
+        listing={listings[activeTab(panelState).id] ?? null}
+        loading={Boolean(loading[activeTab(panelState).id])}
+        panel={panelState}
+        panelId={panelId}
+        platform={platform}
+        onActivate={setActivePanel}
+        onCloseTab={closeTab}
+        onCreateFolder={createFolderInPanel}
+        onEntryContextMenu={openEntryContextMenu}
+        onEntryDragStart={startPathDrag}
+        onGoParent={goParent}
+        onNavigateToPath={navigateTo}
+        onNewTab={newTab}
+        onOpenEntry={openEntry}
+        onRefresh={refreshPanel}
+        onRenameCancel={cancelRename}
+        onRenameChange={(name) =>
+          setRenameState((current) => (current ? { ...current, name } : current))
+        }
+        onRenameCommit={() => void commitRename()}
+        onSelect={selectPath}
+        onSwitchTab={switchTab}
+        renamingName={renameState?.panelId === panelId ? renameState.name : ""}
+        renamingPath={renameState?.panelId === panelId ? renameState.path : null}
+      />
+    );
+  };
 
   return (
     <main className="app-shell">
@@ -1536,146 +1430,13 @@ function App() {
         </div>
       ) : null}
 
-      <div
-        className={`workspace ${terminalVisible ? "with-terminal" : ""}`}
-        ref={workspaceRef}
-        style={workspaceStyle}
-      >
-        <div
-          className={`panels ${rightPanelVisible ? "split-panels" : "single-panel"}`}
-          ref={panelsRef}
-          style={panelsStyle}
-        >
-          <FilePanel
-            panelId="left"
-            panel={session.left}
-            listing={listings[activeTab(session.left).id] ?? null}
-            loading={Boolean(loading[activeTab(session.left).id])}
-            isActive={session.activePanel === "left"}
-            platform={platform}
-            onActivate={setActivePanel}
-            onSwitchTab={switchTab}
-            onNewTab={newTab}
-            onCloseTab={closeTab}
-            onGoParent={goParent}
-            onRefresh={refreshPanel}
-            onSelect={selectPath}
-            onOpenEntry={openEntry}
-            onEntryDragStart={startPathDrag}
-            onEntryContextMenu={openEntryContextMenu}
-            onNavigateToPath={navigateTo}
-            onCreateFolder={createFolderInPanel}
-            renamingPath={renameState?.panelId === "left" ? renameState.path : null}
-            renamingName={renameState?.panelId === "left" ? renameState.name : ""}
-            onRenameChange={(name) =>
-              setRenameState((current) => (current ? { ...current, name } : current))
-            }
-            onRenameCommit={() => void commitRename()}
-            onRenameCancel={cancelRename}
-          />
-          {rightPanelVisible ? (
-            <div
-              aria-label="Resize file panels"
-              aria-orientation="vertical"
-              aria-valuemax={Math.round(MAX_PANEL_SPLIT * 100)}
-              aria-valuemin={Math.round(MIN_PANEL_SPLIT * 100)}
-              aria-valuenow={Math.round(panelSplit * 100)}
-              className="panel-resize-handle"
-              onDoubleClick={() => setPanelSplit(DEFAULT_PANEL_SPLIT)}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowLeft") {
-                  event.preventDefault();
-                  setPanelSplit(panelSplit - PANEL_RESIZE_STEP);
-                }
-                if (event.key === "ArrowRight") {
-                  event.preventDefault();
-                  setPanelSplit(panelSplit + PANEL_RESIZE_STEP);
-                }
-                if (event.key === "Home") {
-                  event.preventDefault();
-                  setPanelSplit(MIN_PANEL_SPLIT);
-                }
-                if (event.key === "End") {
-                  event.preventDefault();
-                  setPanelSplit(MAX_PANEL_SPLIT);
-                }
-              }}
-              onPointerDown={beginPanelResize}
-              role="separator"
-              tabIndex={0}
-            />
-          ) : null}
-          {rightPanelVisible ? (
-            <FilePanel
-              panelId="right"
-              panel={session.right}
-              listing={listings[activeTab(session.right).id] ?? null}
-              loading={Boolean(loading[activeTab(session.right).id])}
-              isActive={session.activePanel === "right"}
-              platform={platform}
-              onActivate={setActivePanel}
-              onSwitchTab={switchTab}
-              onNewTab={newTab}
-              onCloseTab={closeTab}
-              onGoParent={goParent}
-              onRefresh={refreshPanel}
-              onSelect={selectPath}
-              onOpenEntry={openEntry}
-              onEntryDragStart={startPathDrag}
-              onEntryContextMenu={openEntryContextMenu}
-              onNavigateToPath={navigateTo}
-              onCreateFolder={createFolderInPanel}
-              renamingPath={renameState?.panelId === "right" ? renameState.path : null}
-              renamingName={renameState?.panelId === "right" ? renameState.name : ""}
-              onRenameChange={(name) =>
-                setRenameState((current) => (current ? { ...current, name } : current))
-              }
-              onRenameCommit={() => void commitRename()}
-              onRenameCancel={cancelRename}
-            />
-          ) : null}
-        </div>
-        {terminalVisible ? (
-          <div
-            aria-label="Resize terminal"
-            aria-orientation="horizontal"
-            aria-valuemin={MIN_TERMINAL_HEIGHT}
-            aria-valuenow={terminalHeight}
-            className="terminal-resize-handle"
-            onDoubleClick={() => setTerminalHeight(DEFAULT_TERMINAL_HEIGHT)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setTerminalHeight(terminalHeight + TERMINAL_RESIZE_STEP);
-              }
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setTerminalHeight(terminalHeight - TERMINAL_RESIZE_STEP);
-              }
-              if (event.key === "Home") {
-                event.preventDefault();
-                setTerminalHeight(MIN_TERMINAL_HEIGHT);
-              }
-              if (event.key === "End") {
-                event.preventDefault();
-                setTerminalHeight(DEFAULT_TERMINAL_HEIGHT);
-              }
-            }}
-            onPointerDown={beginTerminalResize}
-            role="separator"
-            tabIndex={0}
-          />
-        ) : null}
-        {terminalVisible ? (
-          <TerminalPanel
-            activeDirectory={activeDirectory}
-            cwd={currentTerminalCwd}
-            onBeforeClose={confirmTerminalClose}
-            onClose={closeTerminal}
-            onCwdChange={setTerminalCwd}
-            onLiveSessionCountChange={setTerminalLiveSessionCount}
-          />
-        ) : null}
+      <div className="workspace">
+        <Layout
+          layout={session.layout}
+          onLayoutChange={setLayout}
+          renderPanel={renderPanel}
+          visibility={session.visibility}
+        />
       </div>
       {contextMenu ? (
         <div

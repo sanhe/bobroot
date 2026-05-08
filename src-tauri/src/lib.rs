@@ -101,11 +101,19 @@ struct SessionData {
     left: PanelSession,
     right: PanelSession,
     active_panel: Option<String>,
-    right_panel_visible: Option<bool>,
-    panel_split: Option<f64>,
-    terminal_visible: Option<bool>,
-    terminal_height: Option<u32>,
     show_hidden_files: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layout: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    visibility: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    right_panel_visible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    panel_split: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_visible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_height: Option<u32>,
     window: Option<WindowSession>,
 }
 

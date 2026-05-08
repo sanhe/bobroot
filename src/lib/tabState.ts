@@ -1,13 +1,14 @@
-import type { PanelId, PanelState, SessionData, TabState } from "./types";
+import { buildLayoutFromLegacy, normalizeLayout } from "./layout";
+import type {
+  LayoutNode,
+  PanelId,
+  PanelRef,
+  PanelState,
+  SessionData,
+  TabState,
+} from "./types";
 
 let nextId = 1;
-
-export const DEFAULT_TERMINAL_HEIGHT = 240;
-export const MIN_TERMINAL_HEIGHT = 168;
-export const MAX_TERMINAL_HEIGHT = 520;
-export const DEFAULT_PANEL_SPLIT = 0.5;
-export const MIN_PANEL_SPLIT = 0.24;
-export const MAX_PANEL_SPLIT = 0.76;
 
 export function createTab(path: string): TabState {
   return {
@@ -55,50 +56,53 @@ export function normalizePanel(panel: PanelState, fallbackPath: string): PanelSt
   };
 }
 
-export function normalizeSession(session: SessionData, fallbackPath: string): SessionData {
-  const rightPanelVisible = session.rightPanelVisible !== false;
+export function normalizeSession(
+  session: Partial<SessionData> & {
+    rightPanelVisible?: boolean;
+    panelSplit?: number;
+    terminalVisible?: boolean;
+    terminalHeight?: number;
+  },
+  fallbackPath: string,
+): SessionData {
+  const left = normalizePanel(session.left ?? { tabs: [], activeTabId: "" }, fallbackPath);
+  const right = normalizePanel(session.right ?? { tabs: [], activeTabId: "" }, fallbackPath);
+
+  const { layout, visibility } = resolveLayoutAndVisibility(session);
+
+  const activePanel = session.activePanel === "right" && visibility.right ? "right" : "left";
 
   return {
-    left: normalizePanel(session.left, fallbackPath),
-    right: normalizePanel(session.right, fallbackPath),
-    activePanel:
-      rightPanelVisible && session.activePanel === "right" ? "right" : "left",
-    rightPanelVisible,
-    panelSplit: clampPanelSplit(session.panelSplit),
-    terminalVisible: Boolean(session.terminalVisible),
-    terminalHeight: clampTerminalHeight(session.terminalHeight),
+    left,
+    right,
+    activePanel,
     showHiddenFiles: Boolean(session.showHiddenFiles),
+    layout,
+    visibility,
     window: session.window ?? null,
   };
 }
 
-export function clampTerminalHeight(
-  height: unknown,
-  maximum = MAX_TERMINAL_HEIGHT,
-): number {
-  if (typeof height !== "number" || !Number.isFinite(height)) {
-    return DEFAULT_TERMINAL_HEIGHT;
+function resolveLayoutAndVisibility(session: {
+  layout?: LayoutNode;
+  visibility?: Partial<Record<PanelRef, boolean>>;
+  rightPanelVisible?: boolean;
+  panelSplit?: number;
+  terminalVisible?: boolean;
+  terminalHeight?: number;
+}): { layout: LayoutNode; visibility: Record<PanelRef, boolean> } {
+  if (session.layout) {
+    const layout = normalizeLayout(session.layout);
+    const visibility: Record<PanelRef, boolean> = {
+      left: session.visibility?.left ?? true,
+      right: session.visibility?.right ?? true,
+      terminal: session.visibility?.terminal ?? false,
+    };
+    return { layout, visibility };
   }
 
-  const maxHeight = Math.max(
-    MIN_TERMINAL_HEIGHT,
-    Math.min(Math.round(maximum), MAX_TERMINAL_HEIGHT),
-  );
-  return Math.min(Math.max(Math.round(height), MIN_TERMINAL_HEIGHT), maxHeight);
-}
-
-export function clampPanelSplit(
-  split: unknown,
-  minimum = MIN_PANEL_SPLIT,
-  maximum = MAX_PANEL_SPLIT,
-): number {
-  if (typeof split !== "number" || !Number.isFinite(split)) {
-    return DEFAULT_PANEL_SPLIT;
-  }
-
-  const min = Math.max(0.05, Math.min(minimum, 0.5));
-  const max = Math.min(0.95, Math.max(maximum, 0.5));
-  return Math.min(Math.max(split, min), max);
+  const built = buildLayoutFromLegacy(session);
+  return { layout: normalizeLayout(built.layout), visibility: built.visibility };
 }
 
 export function navigateTab(tab: TabState, path: string): TabState {

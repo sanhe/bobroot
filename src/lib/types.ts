@@ -1,5 +1,18 @@
 export type PanelId = "left" | "right";
 
+export type PanelRef = PanelId | "terminal";
+
+export type SplitDirection = "row" | "column";
+
+export type LayoutNode =
+  | { kind: "leaf"; ref: PanelRef }
+  | {
+      kind: "split";
+      direction: SplitDirection;
+      children: LayoutNode[];
+      sizes: number[];
+    };
+
 export type ConflictStrategy = "replace" | "skip" | "rename";
 
 export type ActionLogDetails = Record<string, unknown>;
@@ -67,11 +80,9 @@ export interface SessionData {
   left: PanelState;
   right: PanelState;
   activePanel: PanelId;
-  rightPanelVisible: boolean;
-  panelSplit: number;
-  terminalVisible: boolean;
-  terminalHeight: number;
   showHiddenFiles: boolean;
+  layout: LayoutNode;
+  visibility: Record<PanelRef, boolean>;
   window: WindowSession | null;
 }
 

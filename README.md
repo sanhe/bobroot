@@ -27,7 +27,7 @@ Bobroot is early-stage experimental software. It is useful for trying the interf
 - Copy and move selected items to the opposite panel
 - Copy selected file and folder paths to the clipboard
 - Cmd-drag selected items into Terminal on macOS to insert shell-safe paths
-- Resizable left/right file panels and bottom terminal panel
+- Free-form layout: drag any panel by its grip handle and drop on the top/right/bottom/left edge of any other panel to rearrange. Resize between any two panels.
 - Shell-backed terminal command execution in the active folder
 - Conflict handling: replace, skip, or rename with a suffix
 - Open files and folders with the default system application
