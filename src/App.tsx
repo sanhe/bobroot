@@ -69,6 +69,7 @@ import type {
 } from "./lib/types";
 import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { ConfirmationDialog } from "./components/ConfirmationDialog";
 import { FilePanel } from "./components/FilePanel";
 import { IconButton } from "./components/IconButton";
 import { Layout, type LayoutDragHandlers } from "./components/Layout";
@@ -1557,44 +1558,24 @@ function App() {
         </div>
       ) : null}
       {confirmation ? (
-        <div
-          className="confirmation-overlay"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              resolveConfirmation(false);
-            }
-          }}
-          role="presentation"
-        >
-          <div
-            aria-modal="true"
-            className="confirmation-dialog"
-            role="dialog"
-            aria-labelledby="confirmation-title"
-            aria-describedby="confirmation-message"
-          >
-            <h2 id="confirmation-title">{confirmation.title}</h2>
-            <p id="confirmation-message">{confirmation.message}</p>
-            <div className="confirmation-actions">
-              <button
-                autoFocus
-                className="secondary-action"
-                type="button"
-                onClick={() => resolveConfirmation(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className={confirmation.destructive ? "destructive-action" : "primary-action"}
-                type="button"
-                onClick={() => resolveConfirmation(true)}
-              >
-                {confirmation.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmationDialog
+          actions={[
+            {
+              autoFocus: true,
+              className: "secondary-action",
+              label: "Cancel",
+              onPress: () => resolveConfirmation(false),
+            },
+            {
+              className: confirmation.destructive ? "destructive-action" : "primary-action",
+              label: confirmation.confirmLabel,
+              onPress: () => resolveConfirmation(true),
+            },
+          ]}
+          message={confirmation.message}
+          onCancel={() => resolveConfirmation(false)}
+          title={confirmation.title}
+        />
       ) : null}
       {pathPrompt ? (
         <PathPrompt
@@ -1604,62 +1585,34 @@ function App() {
         />
       ) : null}
       {conflictRequest ? (
-        <div
-          className="confirmation-overlay"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              resolveConflictStrategy(null);
-            }
-          }}
-          role="presentation"
-        >
-          <div
-            aria-modal="true"
-            className="confirmation-dialog"
-            role="dialog"
-            aria-labelledby="conflict-title"
-            aria-describedby="conflict-message"
-          >
-            <h2 id="conflict-title">
-              {conflictRequest.mode === "copy" ? "Copy items" : "Move items"}
-            </h2>
-            <p id="conflict-message">
-              When an item already exists at the destination, what should Bobroot do?
-            </p>
-            <div className="confirmation-actions">
-              <button
-                className="secondary-action"
-                type="button"
-                onClick={() => resolveConflictStrategy(null)}
-              >
-                Cancel
-              </button>
-              <button
-                className="secondary-action"
-                type="button"
-                onClick={() => resolveConflictStrategy("skip")}
-              >
-                Skip
-              </button>
-              <button
-                className="destructive-action"
-                type="button"
-                onClick={() => resolveConflictStrategy("replace")}
-              >
-                Replace
-              </button>
-              <button
-                autoFocus
-                className="primary-action"
-                type="button"
-                onClick={() => resolveConflictStrategy("rename")}
-              >
-                Rename
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmationDialog
+          actions={[
+            {
+              className: "secondary-action",
+              label: "Cancel",
+              onPress: () => resolveConflictStrategy(null),
+            },
+            {
+              className: "secondary-action",
+              label: "Skip",
+              onPress: () => resolveConflictStrategy("skip"),
+            },
+            {
+              className: "destructive-action",
+              label: "Replace",
+              onPress: () => resolveConflictStrategy("replace"),
+            },
+            {
+              autoFocus: true,
+              className: "primary-action",
+              label: "Rename",
+              onPress: () => resolveConflictStrategy("rename"),
+            },
+          ]}
+          message="When an item already exists at the destination, what should Bobroot do?"
+          onCancel={() => resolveConflictStrategy(null)}
+          title={conflictRequest.mode === "copy" ? "Copy items" : "Move items"}
+        />
       ) : null}
     </main>
   );

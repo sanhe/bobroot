@@ -835,16 +835,26 @@ body.terminal-resizing * {
   cursor: default;
 }
 
-.confirmation-actions button:hover,
-.confirmation-actions button:focus-visible {
+.confirmation-actions button:hover {
   border-color: #9bb7dc;
-  outline: none;
+}
+
+.confirmation-actions button:focus-visible {
+  border-color: #2f7dd1;
+  outline: 2px solid rgba(47, 125, 209, 0.42);
+  outline-offset: 2px;
 }
 
 .confirmation-actions .primary-action {
   border-color: #2f7dd1;
   background: #2f7dd1;
   color: #ffffff;
+}
+
+.confirmation-actions .primary-action:hover,
+.confirmation-actions .primary-action:focus-visible {
+  border-color: #266fbd;
+  background: #266fbd;
 }
 
 .confirmation-actions .destructive-action {
@@ -857,6 +867,10 @@ body.terminal-resizing * {
 .confirmation-actions .destructive-action:focus-visible {
   border-color: #9f2727;
   background: #b83232;
+}
+
+.confirmation-actions .destructive-action:focus-visible {
+  outline-color: rgba(200, 59, 59, 0.42);
 }
 
 .path-prompt-dialog {
