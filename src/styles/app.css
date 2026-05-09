@@ -51,6 +51,34 @@ button {
   font-size: 14px;
 }
 
+.startup-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: min(520px, calc(100% - 40px));
+  padding: 16px;
+  border: 1px solid #ead6a9;
+  border-radius: 8px;
+  background: #fff7e3;
+  color: #5d4505;
+}
+
+.startup-error strong,
+.startup-error span {
+  display: block;
+}
+
+.startup-error strong {
+  margin-bottom: 4px;
+  color: #352703;
+  font-size: 14px;
+}
+
+.startup-error span {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .app-bar {
   display: flex;
   align-items: center;

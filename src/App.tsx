@@ -109,6 +109,7 @@ interface DirectoryChangedPayload {
 
 function App() {
   const [session, setSession] = useState<SessionData | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
   const [listings, setListings] = useState<ListingMap>({});
   const [loading, setLoading] = useState<LoadingMap>({});
   const [notice, setNotice] = useState<string | null>(null);
@@ -348,10 +349,11 @@ function App() {
             };
 
         setSession(initialSession);
+        setStartupError(null);
         setTerminalCwd(activeTab(initialSession[initialSession.activePanel]).path);
         await restoreWindowSession(initialSession.window);
       } catch (error) {
-        reportNotice(errorToMessage(error));
+        setStartupError(errorToMessage(error));
       }
     }
 
@@ -1374,7 +1376,17 @@ function App() {
   if (!session) {
     return (
       <main className="app-shell loading-shell">
-        <div className="initializing">Opening Bobroot...</div>
+        {startupError ? (
+          <div className="startup-error" role="alert">
+            <TriangleAlert size={22} />
+            <div>
+              <strong>Unable to open Bobroot</strong>
+              <span>{startupError}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="initializing">Opening Bobroot...</div>
+        )}
       </main>
     );
   }
