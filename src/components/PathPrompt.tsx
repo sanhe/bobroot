@@ -9,10 +9,15 @@ interface PathPromptProps {
   onCancel: () => void;
 }
 
+interface SuggestionCacheKey {
+  parentDir: string;
+  showHiddenFolders: boolean;
+}
+
 export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptProps) {
   const [value, setValue] = useState(initialValue);
   const [entries, setEntries] = useState<FileEntry[]>([]);
-  const [parentCached, setParentCached] = useState<string | null>(null);
+  const [suggestionCache, setSuggestionCache] = useState<SuggestionCacheKey | null>(null);
   const [highlight, setHighlight] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [showHiddenFolders, setShowHiddenFolders] = useState(false);
@@ -29,7 +34,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
   useEffect(() => {
     if (!parentDir) {
       setEntries([]);
-      setParentCached(null);
+      setSuggestionCache(null);
       setError(null);
       return;
     }
@@ -41,7 +46,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
           return;
         }
         setEntries(listing.entries.filter((entry) => entry.isDir));
-        setParentCached(parentDir);
+        setSuggestionCache({ parentDir, showHiddenFolders });
         setError(null);
       })
       .catch((reason) => {
@@ -49,7 +54,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
           return;
         }
         setEntries([]);
-        setParentCached(null);
+        setSuggestionCache(null);
         setError(messageOf(reason));
       });
 
@@ -59,7 +64,10 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
   }, [parentDir, showHiddenFolders]);
 
   const suggestions = useMemo(() => {
-    if (parentDir !== parentCached) {
+    if (
+      suggestionCache?.parentDir !== parentDir ||
+      suggestionCache.showHiddenFolders !== showHiddenFolders
+    ) {
       return [];
     }
     if (!partial) {
@@ -69,7 +77,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
     return entries
       .filter((entry) => entry.name.toLowerCase().startsWith(lowered))
       .slice(0, 50);
-  }, [entries, parentCached, parentDir, partial]);
+  }, [entries, parentDir, partial, showHiddenFolders, suggestionCache]);
 
   useEffect(() => {
     setHighlight(-1);
