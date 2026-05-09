@@ -15,6 +15,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
   const [parentCached, setParentCached] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(-1);
   const [error, setError] = useState<string | null>(null);
+  const [showHiddenFolders, setShowHiddenFolders] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionRefs = useRef(new Map<string, HTMLLIElement>());
 
@@ -34,7 +35,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
     }
 
     let cancelled = false;
-    void listDirectory(parentDir, true)
+    void listDirectory(parentDir, showHiddenFolders)
       .then((listing) => {
         if (cancelled) {
           return;
@@ -55,7 +56,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
     return () => {
       cancelled = true;
     };
-  }, [parentDir]);
+  }, [parentDir, showHiddenFolders]);
 
   const suggestions = useMemo(() => {
     if (parentDir !== parentCached) {
@@ -72,7 +73,7 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
 
   useEffect(() => {
     setHighlight(-1);
-  }, [parentDir, partial]);
+  }, [parentDir, partial, showHiddenFolders]);
 
   useEffect(() => {
     if (highlight < 0) {
@@ -178,6 +179,14 @@ export function PathPrompt({ initialValue, onNavigate, onCancel }: PathPromptPro
           spellCheck={false}
           value={value}
         />
+        <label className="path-prompt-hidden-toggle">
+          <input
+            checked={showHiddenFolders}
+            onChange={(event) => setShowHiddenFolders(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Show hidden folders</span>
+        </label>
         {suggestions.length > 0 ? (
           <ul className="path-prompt-suggestions" role="listbox">
             {suggestions.map((entry, index) => (
