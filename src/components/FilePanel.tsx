@@ -1,4 +1,6 @@
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   File,
   FileText,
@@ -30,6 +32,8 @@ interface FilePanelProps {
   onSwitchTab: (panelId: PanelId, tabId: string) => void;
   onNewTab: (panelId: PanelId) => void;
   onCloseTab: (panelId: PanelId, tabId: string) => void;
+  onGoBack: (panelId: PanelId) => void;
+  onGoForward: (panelId: PanelId) => void;
   onGoParent: (panelId: PanelId) => void;
   onRefresh: (panelId: PanelId) => void;
   onSelect: (panelId: PanelId, path: string, additive: boolean) => void;
@@ -65,6 +69,8 @@ export function FilePanel({
   onSwitchTab,
   onNewTab,
   onCloseTab,
+  onGoBack,
+  onGoForward,
   onGoParent,
   onRefresh,
   onSelect,
@@ -140,6 +146,20 @@ export function FilePanel({
       </div>
 
       <div className="panel-toolbar">
+        <IconButton
+          disabled={tab.historyIndex <= 0}
+          label="Back"
+          onClick={() => onGoBack(panelId)}
+        >
+          <ArrowLeft size={16} />
+        </IconButton>
+        <IconButton
+          disabled={tab.historyIndex >= tab.history.length - 1}
+          label="Forward"
+          onClick={() => onGoForward(panelId)}
+        >
+          <ArrowRight size={16} />
+        </IconButton>
         <IconButton label="Parent folder" onClick={() => onGoParent(panelId)}>
           <ArrowUp size={16} />
         </IconButton>

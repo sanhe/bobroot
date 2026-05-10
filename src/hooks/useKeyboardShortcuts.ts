@@ -4,6 +4,8 @@ import { currentPlatform } from "../lib/platform";
 interface ShortcutHandlers {
   openSelected: () => void;
   renameSelected: () => void;
+  goBack: () => void;
+  goForward: () => void;
   goParent: () => void;
   switchPanel: () => void;
   newTab: () => void;
@@ -66,6 +68,8 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
       const isKeyL = lowerKey === "l" || event.code === "KeyL";
       const isKeyN = lowerKey === "n" || event.code === "KeyN";
       const isKeyS = lowerKey === "s" || event.code === "KeyS";
+      const isOpenBracket = key === "[" || event.code === "BracketLeft";
+      const isCloseBracket = key === "]" || event.code === "BracketRight";
       const isBackquote = key === "`" || event.code === "Backquote";
 
       if (platform === "macos" && event.metaKey && event.shiftKey && isPeriod) {
@@ -120,6 +124,48 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
 
       const commandOrControl =
         platform === "macos" ? event.metaKey : event.ctrlKey;
+
+      const isBackShortcut =
+        (platform === "macos" &&
+          event.metaKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          isOpenBracket) ||
+        (platform !== "macos" &&
+          event.altKey &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          key === "ArrowLeft");
+
+      if (isBackShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.goBack();
+        return;
+      }
+
+      const isForwardShortcut =
+        (platform === "macos" &&
+          event.metaKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          isCloseBracket) ||
+        (platform !== "macos" &&
+          event.altKey &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          key === "ArrowRight");
+
+      if (isForwardShortcut) {
+        event.preventDefault();
+        event.stopPropagation();
+        handlers.goForward();
+        return;
+      }
 
       const isCopyPathShortcut =
         (platform === "macos" &&

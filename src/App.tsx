@@ -40,6 +40,8 @@ import {
   createPanel,
   createTab,
   navigateTab,
+  navigateTabBack,
+  navigateTabForward,
   normalizeSession,
   oppositePanel,
 } from "./lib/tabState";
@@ -666,6 +668,24 @@ function App() {
         : previous,
     );
   }, [recordAction]);
+
+  const goBack = useCallback((panelId = activePanelId) => {
+    recordAction("navigate_history", { panelId, direction: "back" });
+    setSession((previous) =>
+      previous
+        ? updateActiveTab(previous, panelId, navigateTabBack)
+        : previous,
+    );
+  }, [activePanelId, recordAction]);
+
+  const goForward = useCallback((panelId = activePanelId) => {
+    recordAction("navigate_history", { panelId, direction: "forward" });
+    setSession((previous) =>
+      previous
+        ? updateActiveTab(previous, panelId, navigateTabForward)
+        : previous,
+    );
+  }, [activePanelId, recordAction]);
 
   const openPathPrompt = useCallback(() => {
     if (!session) {
@@ -1349,6 +1369,8 @@ function App() {
     () => ({
       openSelected,
       renameSelected: () => void renameSelected(),
+      goBack,
+      goForward,
       goParent,
       switchPanel,
       newTab,
@@ -1376,6 +1398,8 @@ function App() {
       createFolderInPanel,
       copySelectedPaths,
       deleteSelectedPermanently,
+      goBack,
+      goForward,
       goParent,
       newTab,
       openPathPrompt,
@@ -1467,6 +1491,8 @@ function App() {
         onCreateFolder={createFolderInPanel}
         onEntryContextMenu={openEntryContextMenu}
         onEntryDragStart={startPathDrag}
+        onGoBack={goBack}
+        onGoForward={goForward}
         onGoParent={goParent}
         onNavigateToPath={navigateTo}
         onNewTab={newTab}

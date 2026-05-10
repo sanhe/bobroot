@@ -118,6 +118,34 @@ export function navigateTab(tab: TabState, path: string): TabState {
   };
 }
 
+export function navigateTabBack(tab: TabState): TabState {
+  if (tab.historyIndex <= 0) {
+    return tab;
+  }
+
+  const historyIndex = tab.historyIndex - 1;
+  return {
+    ...tab,
+    path: tab.history[historyIndex],
+    selectedPaths: [],
+    historyIndex,
+  };
+}
+
+export function navigateTabForward(tab: TabState): TabState {
+  if (tab.historyIndex >= tab.history.length - 1) {
+    return tab;
+  }
+
+  const historyIndex = tab.historyIndex + 1;
+  return {
+    ...tab,
+    path: tab.history[historyIndex],
+    selectedPaths: [],
+    historyIndex,
+  };
+}
+
 export function replaceTabPath(tab: TabState, path: string): TabState {
   const nextHistory = [...tab.history];
   nextHistory[tab.historyIndex] = path;
