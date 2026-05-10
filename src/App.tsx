@@ -715,7 +715,6 @@ function App() {
   }, [activePanelId, listings, navigateTo, recordAction, session]);
 
   const syncActivePanelToOpposite = useCallback(() => {
-    recordAction("match_opposite_panel_folder");
     if (!session) {
       return;
     }
@@ -725,8 +724,10 @@ function App() {
       return;
     }
 
-    const panelId = session.activePanel;
-    const sourcePanelId = oppositePanel(panelId);
+    const panelId = oppositePanel(session.activePanel);
+    const sourcePanelId = session.activePanel;
+    recordAction("sync_active_panel_to_opposite", { panelId, sourcePanelId });
+
     const currentTab = activeTab(session[panelId]);
     const sourceTab = activeTab(session[sourcePanelId]);
 
@@ -1507,7 +1508,7 @@ function App() {
           </IconButton>
           <IconButton
             disabled={!rightPanelVisible}
-            label={`Match opposite panel folder (${syncShortcut})`}
+            label={`Sync opposite panel to active folder (${syncShortcut})`}
             onClick={syncActivePanelToOpposite}
           >
             <FolderSync size={16} />
