@@ -793,7 +793,7 @@ body.terminal-resizing * {
 
 .agent-header {
   display: grid;
-  grid-template-columns: auto minmax(130px, auto) minmax(170px, 240px) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
   min-height: 42px;
@@ -816,9 +816,22 @@ body.terminal-resizing * {
   min-width: 0;
   font-size: 13px;
   font-weight: 680;
+  overflow: hidden;
+}
+
+.agent-provider-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #657080;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-status {
+  flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 999px;
   background: #eef1f5;
@@ -876,6 +889,10 @@ body.terminal-resizing * {
   grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+}
+
+.agent-content.settings-collapsed {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .agent-sidebar {

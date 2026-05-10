@@ -8,6 +8,8 @@ import {
   LogIn,
   LogOut,
   Paperclip,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   RotateCcw,
   Send,
@@ -18,6 +20,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ClipboardEvent as ReactClipboardEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   MutableRefObject,
 } from "react";
 import {
@@ -31,6 +34,7 @@ import {
 import {
   AGENT_PROVIDERS,
   CAPABILITY_LABELS,
+  DEFAULT_AGENT_PROVIDER_ID,
   HARNESS_PRESETS,
   buildAgentWorkspaceContext,
   composeAgentPrompt,
@@ -130,7 +134,8 @@ export function AgentPanel({
   onLogAction,
   onNotice,
 }: AgentPanelProps) {
-  const [providerId, setProviderId] = useState(AGENT_PROVIDERS[0].id);
+  const [providerId, setProviderId] = useState(DEFAULT_AGENT_PROVIDER_ID);
+  const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [providerSessions, setProviderSessions] = useState<Record<string, ProviderSessionState>>(
     () =>
       Object.fromEntries(
@@ -820,6 +825,41 @@ export function AgentPanel({
     [provider.id, updateProviderSession],
   );
 
+  const insertDraftNewline = useCallback(
+    (textarea: HTMLTextAreaElement) => {
+      const selectionStart = textarea.selectionStart;
+      const selectionEnd = textarea.selectionEnd;
+      const nextDraft =
+        textarea.value.slice(0, selectionStart) + "\n" + textarea.value.slice(selectionEnd);
+      setDraft(nextDraft);
+      window.requestAnimationFrame(() => {
+        const nextCursor = selectionStart + 1;
+        textarea.selectionStart = nextCursor;
+        textarea.selectionEnd = nextCursor;
+      });
+    },
+    [setDraft],
+  );
+
+  const handleComposerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== "Enter" || event.nativeEvent.isComposing) {
+        return;
+      }
+
+      event.preventDefault();
+      if (event.metaKey || event.ctrlKey) {
+        insertDraftNewline(event.currentTarget);
+        return;
+      }
+
+      if (!sendDisabled) {
+        void sendMessage();
+      }
+    },
+    [insertDraftNewline, sendDisabled, sendMessage],
+  );
+
   return (
     <section className="agent-panel" aria-label="Agent">
       <header className="agent-header">
@@ -835,21 +875,17 @@ export function AgentPanel({
         <div className="agent-title">
           <Bot size={16} />
           <span>Agent</span>
+          <span className="agent-provider-name">{provider.name}</span>
           <span className={`agent-status ${providerSession.status}`}>{providerSession.status}</span>
         </div>
-        <select
-          aria-label="Agent provider"
-          className="agent-provider-select"
-          value={provider.id}
-          onChange={(event) => setProviderId(event.target.value)}
-        >
-          {AGENT_PROVIDERS.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.name}
-            </option>
-          ))}
-        </select>
         <div className="agent-header-actions">
+          <IconButton
+            label={settingsCollapsed ? "Show agent settings" : "Hide agent settings"}
+            className={settingsCollapsed ? "" : "pressed"}
+            onClick={() => setSettingsCollapsed((current) => !current)}
+          >
+            {settingsCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </IconButton>
           <IconButton
             label="Start provider"
             disabled={
@@ -887,187 +923,215 @@ export function AgentPanel({
         </div>
       </header>
 
-      <div className="agent-content">
-        <aside className="agent-sidebar">
-          <section className="agent-sidebar-section">
-            <div className="agent-section-title">Capabilities</div>
-            <div className="agent-capabilities">
-              {provider.capabilities.map((capability) => (
-                <span key={capability}>{CAPABILITY_LABELS[capability]}</span>
-              ))}
-            </div>
-          </section>
-
-          <section className="agent-sidebar-section">
-            <div className="agent-section-heading">
-              <div className="agent-section-title">
-                <KeyRound size={14} />
-                <span>Authorization</span>
-              </div>
-              {provider.auth ? (
-                <IconButton
-                  label="Refresh authorization"
-                  disabled={providerSession.auth.status === "checking"}
-                  onClick={() => void refreshAuthStatus(provider.id)}
+      <div className={`agent-content ${settingsCollapsed ? "settings-collapsed" : ""}`}>
+        {!settingsCollapsed ? (
+          <aside className="agent-sidebar">
+            <section className="agent-sidebar-section">
+              <label className="agent-field">
+                <span>Provider</span>
+                <select
+                  aria-label="Agent provider"
+                  className="agent-provider-select"
+                  value={provider.id}
+                  onChange={(event) => setProviderId(event.target.value)}
                 >
-                  <RotateCcw size={15} />
-                </IconButton>
-              ) : null}
-            </div>
-            <div className={`agent-auth-card ${providerSession.auth.status}`}>
-              <div className="agent-auth-status">
-                <span>{authStatusLabel(providerSession.auth.status)}</span>
-              </div>
-              <p>{providerSession.auth.message}</p>
-              {providerSession.auth.deviceUrl ? (
-                <button
-                  className="agent-auth-link"
-                  type="button"
-                  onClick={() => {
-                    const url = providerSession.auth.deviceUrl;
-                    if (!url) {
-                      return;
-                    }
-                    void openExternalUrl(url).catch((error) => {
-                      const message = errorToMessage(error);
-                      appendLog(provider.id, "error", message);
-                      onNotice(message);
-                    });
-                  }}
-                >
-                  Open authorization URL
-                </button>
-              ) : null}
-              {providerSession.auth.deviceCode ? (
-                <code>{providerSession.auth.deviceCode}</code>
-              ) : null}
-              {providerSession.auth.detail ? (
-                <pre>{providerSession.auth.detail}</pre>
-              ) : null}
-              {provider.auth ? (
-                <div className="agent-auth-actions">
-                  {providerSession.auth.status === "authorizing" ? (
-                    <IconButton label="Cancel" showLabel onClick={stopProviderAuth}>
-                      <Square size={15} />
-                    </IconButton>
-                  ) : provider.auth.login && providerSession.auth.status !== "authenticated" ? (
-                    <IconButton
-                      label="Authorize"
-                      showLabel
-                      disabled={providerSession.auth.status === "checking"}
-                      onClick={() => void startProviderAuth()}
-                    >
-                      <LogIn size={15} />
-                    </IconButton>
-                  ) : null}
-                  {provider.auth.logout ? (
-                    <IconButton
-                      label="Logout"
-                      showLabel
-                      disabled={
-                        providerSession.auth.status !== "authenticated" ||
-                        Boolean(providerSession.auth.authSessionId)
-                      }
-                      onClick={() => void logoutProviderAuth()}
-                    >
-                      <LogOut size={15} />
-                    </IconButton>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </section>
+                  {AGENT_PROVIDERS.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
 
-          <section className="agent-sidebar-section">
-            <label className="agent-field">
-              <span>Preset</span>
-              <select value={providerSession.presetId} onChange={(event) => changePreset(event.target.value)}>
-                {HARNESS_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </option>
+            <section className="agent-sidebar-section">
+              <div className="agent-section-title">Capabilities</div>
+              <div className="agent-capabilities">
+                {provider.capabilities.map((capability) => (
+                  <span key={capability}>{CAPABILITY_LABELS[capability]}</span>
                 ))}
-              </select>
-            </label>
-            <label className="agent-field">
-              <span>System prompt</span>
-              <textarea
-                value={providerSession.systemPrompt}
-                onChange={(event) => changeSystemPrompt(event.target.value)}
-                rows={4}
-              />
-            </label>
-          </section>
+              </div>
+            </section>
 
-          <section className="agent-sidebar-section">
-            <div className="agent-section-title">Workspace</div>
-            <dl className="agent-context-list">
-              <div>
-                <dt>Active</dt>
-                <dd title={workspaceContext.activeFolder}>{displayPath(workspaceContext.activeFolder)}</dd>
+            <section className="agent-sidebar-section">
+              <div className="agent-section-heading">
+                <div className="agent-section-title">
+                  <KeyRound size={14} />
+                  <span>Authorization</span>
+                </div>
+                {provider.auth ? (
+                  <IconButton
+                    label="Refresh authorization"
+                    disabled={providerSession.auth.status === "checking"}
+                    onClick={() => void refreshAuthStatus(provider.id)}
+                  >
+                    <RotateCcw size={15} />
+                  </IconButton>
+                ) : null}
               </div>
-              <div>
-                <dt>Opposite</dt>
-                <dd title={workspaceContext.oppositeFolder}>{displayPath(workspaceContext.oppositeFolder)}</dd>
-              </div>
-              <div>
-                <dt>Selected</dt>
-                <dd>{selectedPaths.length}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section className="agent-sidebar-section">
-            <div className="agent-section-heading">
-              <div className="agent-section-title">Attachments</div>
-              <IconButton
-                label="Attach selected files"
-                disabled={selectedPaths.length === 0}
-                onClick={addSelectedAttachments}
-              >
-                <Paperclip size={15} />
-              </IconButton>
-            </div>
-            <div className="agent-attachments">
-              {providerSession.attachments.length === 0 ? (
-                <div className="agent-empty">None</div>
-              ) : (
-                providerSession.attachments.map((attachment) => (
-                  <div className="agent-attachment" key={attachment.id}>
-                    {attachment.kind === "image" && attachment.dataUrl ? (
-                      <img alt="" src={attachment.dataUrl} />
-                    ) : (
-                      <Paperclip size={14} />
-                    )}
-                    <span title={describeAttachment(attachment)}>{attachment.name}</span>
-                    <button type="button" onClick={() => removeAttachment(attachment.id)}>
-                      <X size={12} />
-                    </button>
+              <div className={`agent-auth-card ${providerSession.auth.status}`}>
+                <div className="agent-auth-status">
+                  <span>{authStatusLabel(providerSession.auth.status)}</span>
+                </div>
+                <p>{providerSession.auth.message}</p>
+                {providerSession.auth.deviceUrl ? (
+                  <button
+                    className="agent-auth-link"
+                    type="button"
+                    onClick={() => {
+                      const url = providerSession.auth.deviceUrl;
+                      if (!url) {
+                        return;
+                      }
+                      void openExternalUrl(url).catch((error) => {
+                        const message = errorToMessage(error);
+                        appendLog(provider.id, "error", message);
+                        onNotice(message);
+                      });
+                    }}
+                  >
+                    Open authorization URL
+                  </button>
+                ) : null}
+                {providerSession.auth.deviceCode ? (
+                  <code>{providerSession.auth.deviceCode}</code>
+                ) : null}
+                {providerSession.auth.detail ? (
+                  <pre>{providerSession.auth.detail}</pre>
+                ) : null}
+                {provider.auth ? (
+                  <div className="agent-auth-actions">
+                    {providerSession.auth.status === "authorizing" ? (
+                      <IconButton label="Cancel" showLabel onClick={stopProviderAuth}>
+                        <Square size={15} />
+                      </IconButton>
+                    ) : provider.auth.login &&
+                      providerSession.auth.status !== "authenticated" ? (
+                      <IconButton
+                        label="Authorize"
+                        showLabel
+                        disabled={providerSession.auth.status === "checking"}
+                        onClick={() => void startProviderAuth()}
+                      >
+                        <LogIn size={15} />
+                      </IconButton>
+                    ) : null}
+                    {provider.auth.logout ? (
+                      <IconButton
+                        label="Logout"
+                        showLabel
+                        disabled={
+                          providerSession.auth.status !== "authenticated" ||
+                          Boolean(providerSession.auth.authSessionId)
+                        }
+                        onClick={() => void logoutProviderAuth()}
+                      >
+                        <LogOut size={15} />
+                      </IconButton>
+                    ) : null}
                   </div>
-                ))
-              )}
-            </div>
-          </section>
+                ) : null}
+              </div>
+            </section>
 
-          <section className="agent-sidebar-section agent-log-section">
-            <div className="agent-section-title">
-              <Activity size={14} />
-              <span>Events</span>
-            </div>
-            <div className="agent-event-log">
-              {providerSession.logs.length === 0 ? (
-                <div className="agent-empty">No events</div>
-              ) : (
-                providerSession.logs.map((entry) => (
-                  <div className={`agent-log-entry ${entry.level}`} key={entry.id}>
-                    <time>{formatLogTime(entry.timestamp)}</time>
-                    <span>{entry.message}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        </aside>
+            <section className="agent-sidebar-section">
+              <label className="agent-field">
+                <span>Preset</span>
+                <select
+                  value={providerSession.presetId}
+                  onChange={(event) => changePreset(event.target.value)}
+                >
+                  {HARNESS_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="agent-field">
+                <span>System prompt</span>
+                <textarea
+                  value={providerSession.systemPrompt}
+                  onChange={(event) => changeSystemPrompt(event.target.value)}
+                  rows={4}
+                />
+              </label>
+            </section>
+
+            <section className="agent-sidebar-section">
+              <div className="agent-section-title">Workspace</div>
+              <dl className="agent-context-list">
+                <div>
+                  <dt>Active</dt>
+                  <dd title={workspaceContext.activeFolder}>
+                    {displayPath(workspaceContext.activeFolder)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Opposite</dt>
+                  <dd title={workspaceContext.oppositeFolder}>
+                    {displayPath(workspaceContext.oppositeFolder)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Selected</dt>
+                  <dd>{selectedPaths.length}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="agent-sidebar-section">
+              <div className="agent-section-heading">
+                <div className="agent-section-title">Attachments</div>
+                <IconButton
+                  label="Attach selected files"
+                  disabled={selectedPaths.length === 0}
+                  onClick={addSelectedAttachments}
+                >
+                  <Paperclip size={15} />
+                </IconButton>
+              </div>
+              <div className="agent-attachments">
+                {providerSession.attachments.length === 0 ? (
+                  <div className="agent-empty">None</div>
+                ) : (
+                  providerSession.attachments.map((attachment) => (
+                    <div className="agent-attachment" key={attachment.id}>
+                      {attachment.kind === "image" && attachment.dataUrl ? (
+                        <img alt="" src={attachment.dataUrl} />
+                      ) : (
+                        <Paperclip size={14} />
+                      )}
+                      <span title={describeAttachment(attachment)}>{attachment.name}</span>
+                      <button type="button" onClick={() => removeAttachment(attachment.id)}>
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="agent-sidebar-section agent-log-section">
+              <div className="agent-section-title">
+                <Activity size={14} />
+                <span>Events</span>
+              </div>
+              <div className="agent-event-log">
+                {providerSession.logs.length === 0 ? (
+                  <div className="agent-empty">No events</div>
+                ) : (
+                  providerSession.logs.map((entry) => (
+                    <div className={`agent-log-entry ${entry.level}`} key={entry.id}>
+                      <time>{formatLogTime(entry.timestamp)}</time>
+                      <span>{entry.message}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </aside>
+        ) : null}
 
         <section className="agent-chat">
           <div className="agent-messages" role="log">
@@ -1091,12 +1155,7 @@ export function AgentPanel({
             <textarea
               value={providerSession.draft}
               onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault();
-                  void sendMessage();
-                }
-              }}
+              onKeyDown={handleComposerKeyDown}
               onPaste={handlePaste}
               placeholder="Ask the selected provider..."
               rows={3}

@@ -122,6 +122,8 @@ export const HARNESS_PRESETS: HarnessPreset[] = [
   },
 ];
 
+export const DEFAULT_AGENT_PROVIDER_ID = "codex-cli";
+
 export const AGENT_PROVIDERS: AgentProvider[] = [
   {
     id: "mock",
@@ -181,7 +183,11 @@ export const AGENT_PROVIDERS: AgentProvider[] = [
 ];
 
 export function getAgentProvider(providerId: string): AgentProvider {
-  return AGENT_PROVIDERS.find((provider) => provider.id === providerId) ?? AGENT_PROVIDERS[0];
+  return (
+    AGENT_PROVIDERS.find((provider) => provider.id === providerId) ??
+    AGENT_PROVIDERS.find((provider) => provider.id === DEFAULT_AGENT_PROVIDER_ID) ??
+    AGENT_PROVIDERS[0]
+  );
 }
 
 export function buildAgentWorkspaceContext(
