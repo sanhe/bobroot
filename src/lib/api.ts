@@ -18,6 +18,23 @@ export interface AgentProcessStartRequest {
   rows: number;
 }
 
+export interface AgentCommandRequest {
+  providerId: string;
+  label: string;
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
+export interface AgentCommandResult {
+  providerId: string;
+  label: string;
+  stdout: string;
+  stderr: string;
+  status: number | null;
+  success: boolean;
+}
+
 const BROWSER_BACKEND_MESSAGE =
   "Desktop filesystem commands are unavailable in browser preview. Run the app with pnpm tauri:dev to use local files.";
 
@@ -82,6 +99,10 @@ export async function permanentlyDelete(items: string[]): Promise<OperationRepor
 
 export async function openPath(path: string): Promise<void> {
   return invokeDesktop("open_path", { path });
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  return invokeDesktop("open_external_url", { url });
 }
 
 export async function previewPath(path: string): Promise<void> {
@@ -162,6 +183,12 @@ export async function resizeAgentProcess(
 
 export async function stopAgentProcess(sessionId: string): Promise<void> {
   return invokeDesktop("stop_agent_process", { sessionId });
+}
+
+export async function runAgentCommand(
+  request: AgentCommandRequest,
+): Promise<AgentCommandResult> {
+  return invokeDesktop("run_agent_command", { request });
 }
 
 export async function loadSession(): Promise<SessionData | null> {

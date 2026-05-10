@@ -4,6 +4,9 @@ import {
   Activity,
   Bot,
   GripVertical,
+  KeyRound,
+  LogIn,
+  LogOut,
   Paperclip,
   Play,
   RotateCcw,
@@ -18,9 +21,12 @@ import type {
   MutableRefObject,
 } from "react";
 import {
+  openExternalUrl,
+  runAgentCommand,
   startAgentProcess,
   stopAgentProcess,
   writeAgentProcessData,
+  type AgentCommandResult,
 } from "../lib/api";
 import {
   AGENT_PROVIDERS,
@@ -69,6 +75,13 @@ interface AgentEventPayload {
 }
 
 type AgentStatus = "idle" | "starting" | "running" | "exited" | "failed";
+type ProviderAuthStatus =
+  | "unknown"
+  | "checking"
+  | "authenticated"
+  | "unauthenticated"
+  | "authorizing"
+  | "error";
 
 interface AgentMessage {
   id: string;
@@ -85,10 +98,20 @@ interface AgentLogEntry {
   message: string;
 }
 
+interface ProviderAuthState {
+  status: ProviderAuthStatus;
+  message: string;
+  detail: string;
+  authSessionId: string | null;
+  deviceUrl: string | null;
+  deviceCode: string | null;
+}
+
 interface ProviderSessionState {
   providerId: string;
   runtimeSessionId: string | null;
   status: AgentStatus;
+  auth: ProviderAuthState;
   messages: AgentMessage[];
   attachments: AgentAttachment[];
   logs: AgentLogEntry[];
@@ -122,8 +145,13 @@ export function AgentPanel({
   const activeFolder = activeTab(session[session.activePanel]).path;
   const selectedPaths = activeTab(session[session.activePanel]).selectedPaths;
   const providerAdapter = provider.adapter;
+  const authBlocksSend = Boolean(
+    provider.auth &&
+      ["checking", "unauthenticated", "authorizing"].includes(providerSession.auth.status),
+  );
   const sendDisabled =
     !providerSession.draft.trim() ||
+    authBlocksSend ||
     (providerAdapter?.execution === "perPrompt" && isLiveAgentStatus(providerSession.status));
   const workspaceContext = useMemo(
     () => buildAgentWorkspaceContext(session, providerSession.attachments),
@@ -164,12 +192,96 @@ export function AgentPanel({
     [updateProviderSession],
   );
 
+  const refreshAuthStatus = useCallback(
+    async (targetProviderId = provider.id) => {
+      const targetProvider = getAgentProvider(targetProviderId);
+      if (!targetProvider.auth) {
+        updateProviderSession(targetProviderId, (current) => ({
+          ...current,
+          auth: {
+            ...current.auth,
+            status: "authenticated",
+            message: "No provider authorization required.",
+            detail: "",
+            authSessionId: null,
+            deviceUrl: null,
+            deviceCode: null,
+          },
+        }));
+        return;
+      }
+
+      updateProviderSession(targetProviderId, (current) => ({
+        ...current,
+        auth: { ...current.auth, status: "checking", message: "Checking provider login..." },
+      }));
+
+      try {
+        const result = await runAgentCommand({
+          providerId: targetProvider.id,
+          label: `${targetProvider.name} login status`,
+          command: targetProvider.auth.status.command,
+          args: targetProvider.auth.status.args,
+          cwd: activeFolder,
+        });
+        updateProviderSession(targetProviderId, (current) => ({
+          ...current,
+          auth: parseProviderAuthStatus(targetProvider, result, current.auth),
+        }));
+      } catch (error) {
+        const message = errorToMessage(error);
+        appendLog(targetProviderId, "error", message);
+        updateProviderSession(targetProviderId, (current) => ({
+          ...current,
+          auth: {
+            ...current.auth,
+            status: "error",
+            message,
+            detail: "",
+            authSessionId: null,
+          },
+        }));
+      }
+    },
+    [activeFolder, appendLog, provider.id, updateProviderSession],
+  );
+
+  useEffect(() => {
+    void refreshAuthStatus(provider.id);
+  }, [provider.id, refreshAuthStatus]);
+
   useEffect(() => {
     let disposed = false;
     let unlisteners: UnlistenFn[] = [];
 
     void Promise.all([
       listen<AgentOutputPayload>("agent-output", (event) => {
+        const currentForOutput = providerSessionsRef.current[event.payload.providerId];
+        if (currentForOutput?.auth.authSessionId === event.payload.sessionId) {
+          const chunk = stripAnsi(event.payload.data);
+          updateProviderSession(event.payload.providerId, (current) => {
+            if (current.auth.authSessionId !== event.payload.sessionId) {
+              return current;
+            }
+            const detail = trimAuthDetail(`${current.auth.detail}${chunk}`);
+            const parsed = parseDeviceAuthDetail(detail);
+            return {
+              ...current,
+              auth: {
+                ...current.auth,
+                status: "authorizing",
+                message: parsed.deviceCode
+                  ? "Enter the device code in your browser to authorize this provider."
+                  : "Waiting for provider authorization...",
+                detail,
+                deviceUrl: parsed.deviceUrl ?? current.auth.deviceUrl,
+                deviceCode: parsed.deviceCode ?? current.auth.deviceCode,
+              },
+            };
+          });
+          return;
+        }
+
         const eventProvider = getAgentProvider(event.payload.providerId);
         if (eventProvider.adapter?.outputFormat === "codexJsonl") {
           processCodexJsonlOutput(
@@ -202,6 +314,29 @@ export function AgentPanel({
         });
       }),
       listen<AgentExitPayload>("agent-exit", (event) => {
+        const currentForExit = providerSessionsRef.current[event.payload.providerId];
+        if (currentForExit?.auth.authSessionId === event.payload.sessionId) {
+          delete outputBuffersRef.current[event.payload.sessionId];
+          updateProviderSession(event.payload.providerId, (current) => {
+            if (current.auth.authSessionId !== event.payload.sessionId) {
+              return current;
+            }
+            const success = event.payload.status === 0;
+            return {
+              ...current,
+              auth: {
+                ...current.auth,
+                status: success ? "authenticated" : "error",
+                message: success
+                  ? "Provider is authenticated."
+                  : event.payload.message ?? "Provider authorization did not complete.",
+                authSessionId: null,
+              },
+            };
+          });
+          return;
+        }
+
         delete outputBuffersRef.current[event.payload.sessionId];
         updateProviderSession(event.payload.providerId, (current) => {
           if (current.runtimeSessionId !== event.payload.sessionId) {
@@ -423,6 +558,147 @@ export function AgentPanel({
     }));
   }, [appendLog, provider.id, providerSession.runtimeSessionId, updateProviderSession]);
 
+  const startProviderAuth = useCallback(async () => {
+    if (!provider.auth?.login) {
+      return;
+    }
+
+    updateProviderSession(provider.id, (current) => ({
+      ...current,
+      auth: {
+        ...current.auth,
+        status: "authorizing",
+        message: "Starting provider authorization...",
+        detail: "",
+        authSessionId: null,
+        deviceUrl: null,
+        deviceCode: null,
+      },
+    }));
+    appendLog(provider.id, "info", `Starting ${provider.name} authorization`);
+    onLogAction("agent_provider_auth_started", { providerId: provider.id });
+
+    try {
+      const authSessionId = await startAgentProcess({
+        providerId: provider.id,
+        label: `${provider.name} authorization`,
+        command: provider.auth.login.command,
+        args: provider.auth.login.args,
+        cwd: activeFolder,
+        cols: 100,
+        rows: 24,
+      });
+      updateProviderSession(provider.id, (current) => ({
+        ...current,
+        auth: {
+          ...current.auth,
+          status: "authorizing",
+          message: "Waiting for provider authorization...",
+          authSessionId,
+        },
+      }));
+    } catch (error) {
+      const message = errorToMessage(error);
+      appendLog(provider.id, "error", message);
+      onNotice(message);
+      updateProviderSession(provider.id, (current) => ({
+        ...current,
+        auth: {
+          ...current.auth,
+          status: "error",
+          message,
+          authSessionId: null,
+        },
+      }));
+    }
+  }, [activeFolder, appendLog, onLogAction, onNotice, provider, updateProviderSession]);
+
+  const stopProviderAuth = useCallback(() => {
+    const authSessionId = providerSession.auth.authSessionId;
+    if (!authSessionId) {
+      return;
+    }
+
+    void stopAgentProcess(authSessionId).catch((error) => {
+      appendLog(provider.id, "error", errorToMessage(error));
+    });
+    updateProviderSession(provider.id, (current) => ({
+      ...current,
+      auth: {
+        ...current.auth,
+        status: "unauthenticated",
+        message: "Provider authorization was cancelled.",
+        authSessionId: null,
+      },
+    }));
+  }, [appendLog, provider.id, providerSession.auth.authSessionId, updateProviderSession]);
+
+  const logoutProviderAuth = useCallback(async () => {
+    if (!provider.auth?.logout) {
+      return;
+    }
+
+    if (providerSession.auth.authSessionId) {
+      await stopAgentProcess(providerSession.auth.authSessionId).catch((error) => {
+        appendLog(provider.id, "error", errorToMessage(error));
+      });
+    }
+
+    updateProviderSession(provider.id, (current) => ({
+      ...current,
+      auth: {
+        ...current.auth,
+        status: "checking",
+        message: "Logging out provider...",
+        authSessionId: null,
+      },
+    }));
+    onLogAction("agent_provider_logout_requested", { providerId: provider.id });
+
+    try {
+      await runAgentCommand({
+        providerId: provider.id,
+        label: `${provider.name} logout`,
+        command: provider.auth.logout.command,
+        args: provider.auth.logout.args,
+        cwd: activeFolder,
+      });
+      updateProviderSession(provider.id, (current) => ({
+        ...current,
+        auth: {
+          ...current.auth,
+          status: "unauthenticated",
+          message: "Provider is not authenticated.",
+          detail: "",
+          authSessionId: null,
+          deviceUrl: null,
+          deviceCode: null,
+        },
+      }));
+    } catch (error) {
+      const message = errorToMessage(error);
+      appendLog(provider.id, "error", message);
+      onNotice(message);
+      updateProviderSession(provider.id, (current) => ({
+        ...current,
+        auth: {
+          ...current.auth,
+          status: "error",
+          message,
+          authSessionId: null,
+        },
+      }));
+    }
+  }, [
+    activeFolder,
+    appendLog,
+    onLogAction,
+    onNotice,
+    provider,
+    providerSession.auth.authSessionId,
+    updateProviderSession,
+  ]);
+
   const restartProvider = useCallback(async () => {
     if (providerSession.runtimeSessionId) {
       await stopAgentProcess(providerSession.runtimeSessionId).catch((error) => {
@@ -623,6 +899,86 @@ export function AgentPanel({
           </section>
 
           <section className="agent-sidebar-section">
+            <div className="agent-section-heading">
+              <div className="agent-section-title">
+                <KeyRound size={14} />
+                <span>Authorization</span>
+              </div>
+              {provider.auth ? (
+                <IconButton
+                  label="Refresh authorization"
+                  disabled={providerSession.auth.status === "checking"}
+                  onClick={() => void refreshAuthStatus(provider.id)}
+                >
+                  <RotateCcw size={15} />
+                </IconButton>
+              ) : null}
+            </div>
+            <div className={`agent-auth-card ${providerSession.auth.status}`}>
+              <div className="agent-auth-status">
+                <span>{authStatusLabel(providerSession.auth.status)}</span>
+              </div>
+              <p>{providerSession.auth.message}</p>
+              {providerSession.auth.deviceUrl ? (
+                <button
+                  className="agent-auth-link"
+                  type="button"
+                  onClick={() => {
+                    const url = providerSession.auth.deviceUrl;
+                    if (!url) {
+                      return;
+                    }
+                    void openExternalUrl(url).catch((error) => {
+                      const message = errorToMessage(error);
+                      appendLog(provider.id, "error", message);
+                      onNotice(message);
+                    });
+                  }}
+                >
+                  Open authorization URL
+                </button>
+              ) : null}
+              {providerSession.auth.deviceCode ? (
+                <code>{providerSession.auth.deviceCode}</code>
+              ) : null}
+              {providerSession.auth.detail ? (
+                <pre>{providerSession.auth.detail}</pre>
+              ) : null}
+              {provider.auth ? (
+                <div className="agent-auth-actions">
+                  {providerSession.auth.status === "authorizing" ? (
+                    <IconButton label="Cancel" showLabel onClick={stopProviderAuth}>
+                      <Square size={15} />
+                    </IconButton>
+                  ) : provider.auth.login && providerSession.auth.status !== "authenticated" ? (
+                    <IconButton
+                      label="Authorize"
+                      showLabel
+                      disabled={providerSession.auth.status === "checking"}
+                      onClick={() => void startProviderAuth()}
+                    >
+                      <LogIn size={15} />
+                    </IconButton>
+                  ) : null}
+                  {provider.auth.logout ? (
+                    <IconButton
+                      label="Logout"
+                      showLabel
+                      disabled={
+                        providerSession.auth.status !== "authenticated" ||
+                        Boolean(providerSession.auth.authSessionId)
+                      }
+                      onClick={() => void logoutProviderAuth()}
+                    >
+                      <LogOut size={15} />
+                    </IconButton>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="agent-sidebar-section">
             <label className="agent-field">
               <span>Preset</span>
               <select value={providerSession.presetId} onChange={(event) => changePreset(event.target.value)}>
@@ -770,6 +1126,7 @@ function createProviderSession(providerId: string): ProviderSessionState {
     providerId,
     runtimeSessionId: null,
     status: "idle",
+    auth: createProviderAuthState(),
     messages: [],
     attachments: [],
     logs: [],
@@ -777,6 +1134,17 @@ function createProviderSession(providerId: string): ProviderSessionState {
     presetId: "default",
     systemPrompt: "",
     pendingResponseId: null,
+  };
+}
+
+function createProviderAuthState(): ProviderAuthState {
+  return {
+    status: "unknown",
+    message: "Authorization status has not been checked.",
+    detail: "",
+    authSessionId: null,
+    deviceUrl: null,
+    deviceCode: null,
   };
 }
 
@@ -947,6 +1315,80 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isLiveAgentStatus(status: AgentStatus): boolean {
   return status === "starting" || status === "running";
+}
+
+function parseProviderAuthStatus(
+  provider: AgentProvider,
+  result: AgentCommandResult,
+  previous: ProviderAuthState,
+): ProviderAuthState {
+  const output = stripAnsi(`${result.stdout}\n${result.stderr}`).trim();
+
+  if (provider.auth?.statusParser === "codexLoginStatus") {
+    if (/logged in/i.test(output)) {
+      return {
+        ...previous,
+        status: "authenticated",
+        message: output || "Provider is authenticated.",
+        detail: "",
+        authSessionId: null,
+        deviceUrl: null,
+        deviceCode: null,
+      };
+    }
+
+    if (/not logged in/i.test(output)) {
+      return {
+        ...previous,
+        status: "unauthenticated",
+        message: "Provider is not authenticated.",
+        detail: output,
+        authSessionId: null,
+        deviceUrl: null,
+        deviceCode: null,
+      };
+    }
+  }
+
+  return {
+    ...previous,
+    status: result.success ? "unknown" : "error",
+    message: output || (result.success ? "Provider status is unknown." : "Provider status check failed."),
+    detail: output,
+    authSessionId: null,
+  };
+}
+
+function parseDeviceAuthDetail(detail: string): {
+  deviceUrl: string | null;
+  deviceCode: string | null;
+} {
+  const deviceUrl = detail.match(/https:\/\/\S+/)?.[0] ?? null;
+  const deviceCode = detail.match(/\b[A-Z0-9]{4,8}-[A-Z0-9]{4,8}\b/)?.[0] ?? null;
+  return { deviceUrl, deviceCode };
+}
+
+function trimAuthDetail(detail: string): string {
+  const maxLength = 1600;
+  return detail.length > maxLength ? detail.slice(detail.length - maxLength) : detail;
+}
+
+function authStatusLabel(status: ProviderAuthStatus): string {
+  switch (status) {
+    case "checking":
+      return "Checking";
+    case "authenticated":
+      return "Authenticated";
+    case "unauthenticated":
+      return "Not authenticated";
+    case "authorizing":
+      return "Authorizing";
+    case "error":
+      return "Auth error";
+    case "unknown":
+    default:
+      return "Unknown";
+  }
 }
 
 function formatLogTime(timestamp: number): string {

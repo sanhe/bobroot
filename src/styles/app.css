@@ -924,6 +924,105 @@ body.terminal-resizing * {
   line-height: 1.2;
 }
 
+.agent-auth-card {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #dfe4eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.agent-auth-card.authenticated {
+  border-color: #bde6cd;
+  background: #f1fbf5;
+}
+
+.agent-auth-card.unauthenticated,
+.agent-auth-card.error {
+  border-color: #efd0d0;
+  background: #fff7f7;
+}
+
+.agent-auth-card.authorizing,
+.agent-auth-card.checking {
+  border-color: #ead9a8;
+  background: #fffaf0;
+}
+
+.agent-auth-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-auth-status span {
+  min-width: 0;
+  color: #313944;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agent-auth-card p {
+  margin: 0;
+  color: #5d6673;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-auth-link {
+  width: max-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #0b5cab;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: default;
+}
+
+.agent-auth-link:hover {
+  text-decoration: underline;
+}
+
+.agent-auth-card code {
+  width: max-content;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #d7dde6;
+  border-radius: 6px;
+  background: #f7f9fc;
+  color: #1f2937;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.agent-auth-card pre {
+  max-height: 110px;
+  margin: 0;
+  padding: 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #4b5563;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .agent-field {
   display: grid;
   gap: 5px;

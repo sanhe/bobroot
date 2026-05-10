@@ -190,6 +190,27 @@ struct AgentProcessStartRequest {
     rows: u16,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentCommandRequest {
+    provider_id: String,
+    label: String,
+    command: String,
+    args: Vec<String>,
+    cwd: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentCommandResult {
+    provider_id: String,
+    label: String,
+    stdout: String,
+    stderr: String,
+    status: Option<i32>,
+    success: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentOutputPayload {
@@ -540,6 +561,24 @@ fn open_path(path: String) -> CommandResult<()> {
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> CommandResult<()> {
+    let url = url.trim();
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(CommandError::new(
+            "invalid_url",
+            "Only http and https URLs can be opened",
+        ));
+    }
+
+    open::that(url).map_err(|error| {
+        CommandError::new(
+            "open_failed",
+            format!("Could not open authorization URL: {}", error),
+        )
+    })
+}
+
+#[tauri::command]
 fn preview_path(path: String) -> CommandResult<()> {
     let path = normalize_input_path(&path)?;
     if !path_exists(&path)? {
@@ -813,6 +852,50 @@ fn resolve_terminal_directory(cwd: String, target: String) -> CommandResult<Stri
     };
 
     Ok(path_to_string(resolve_existing_directory_path(&next_dir)?))
+}
+
+#[tauri::command]
+fn run_agent_command(request: AgentCommandRequest) -> CommandResult<AgentCommandResult> {
+    let command_name = request.command.trim();
+    if command_name.is_empty() {
+        return Err(CommandError::new(
+            "invalid_provider",
+            "Provider command is required",
+        ));
+    }
+
+    let provider_id = request.provider_id.trim();
+    if provider_id.is_empty() {
+        return Err(CommandError::new(
+            "invalid_provider",
+            "Provider id is required",
+        ));
+    }
+
+    let working_dir = resolve_existing_directory(&request.cwd)?;
+    let output = Command::new(command_name)
+        .args(&request.args)
+        .current_dir(&working_dir)
+        .output()
+        .map_err(|error| {
+            CommandError::new(
+                error.kind().to_string(),
+                format!(
+                    "Could not run provider command in '{}': {}",
+                    working_dir.display(),
+                    error
+                ),
+            )
+        })?;
+
+    Ok(AgentCommandResult {
+        provider_id: provider_id.to_string(),
+        label: request.label,
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        status: output.status.code(),
+        success: output.status.success(),
+    })
 }
 
 #[tauri::command]
@@ -1728,6 +1811,7 @@ pub fn run() {
             move_to_trash,
             permanently_delete,
             open_path,
+            open_external_url,
             preview_path,
             reveal_path,
             rename_item,
@@ -1738,6 +1822,7 @@ pub fn run() {
             resize_terminal_session,
             stop_terminal_session,
             resolve_terminal_directory,
+            run_agent_command,
             start_agent_process,
             write_agent_process_data,
             resize_agent_process,

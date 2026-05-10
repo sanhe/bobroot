@@ -24,6 +24,18 @@ export interface TerminalAgentAdapter {
   outputFormat: "plain" | "ansi" | "codexJsonl";
 }
 
+export interface AgentProviderCommand {
+  command: string;
+  args: string[];
+}
+
+export interface AgentProviderAuth {
+  status: AgentProviderCommand;
+  login?: AgentProviderCommand;
+  logout?: AgentProviderCommand;
+  statusParser: "codexLoginStatus";
+}
+
 export interface AgentProvider {
   id: string;
   name: string;
@@ -31,6 +43,7 @@ export interface AgentProvider {
   kind: AgentProviderKind;
   capabilities: AgentProviderCapability[];
   adapter?: TerminalAgentAdapter;
+  auth?: AgentProviderAuth;
 }
 
 export interface AgentAttachment {
@@ -148,6 +161,21 @@ export const AGENT_PROVIDERS: AgentProvider[] = [
       execution: "perPrompt",
       promptDelivery: "argument",
       outputFormat: "codexJsonl",
+    },
+    auth: {
+      status: {
+        command: "codex",
+        args: ["login", "status"],
+      },
+      login: {
+        command: "codex",
+        args: ["login", "--device-auth"],
+      },
+      logout: {
+        command: "codex",
+        args: ["logout"],
+      },
+      statusParser: "codexLoginStatus",
     },
   },
 ];

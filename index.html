@@ -78,6 +78,14 @@
             if (cmd.startsWith("plugin:event|")) {
               return null;
             }
+            if (cmd === "open_external_url") {
+              window.__BR_TEST_ACTIONS.push({
+                timestamp: Date.now(),
+                action: "open_external_url",
+                details: { url: args.url },
+              });
+              return null;
+            }
             if (cmd === "start_terminal_session") {
               return "mock-terminal-session";
             }
@@ -90,6 +98,16 @@
             }
             if (cmd === "start_agent_process") {
               return "mock-agent-process";
+            }
+            if (cmd === "run_agent_command") {
+              return {
+                providerId: args.request?.providerId ?? "mock",
+                label: args.request?.label ?? "Provider command",
+                stdout: "Logged in using ChatGPT",
+                stderr: "",
+                status: 0,
+                success: true,
+              };
             }
             if (
               cmd === "write_agent_process_data" ||
