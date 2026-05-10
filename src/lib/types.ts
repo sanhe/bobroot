@@ -17,6 +17,14 @@ export type ConflictStrategy = "replace" | "skip" | "rename";
 
 export type ActionLogDetails = Record<string, unknown>;
 
+export type FormatFilter = "all" | "folders" | "noExtension" | `extension:${string}`;
+
+export interface FormatFilterOption {
+  value: FormatFilter;
+  label: string;
+  count: number;
+}
+
 export interface FileEntry {
   name: string;
   path: string;

@@ -63,6 +63,8 @@ import type {
   ConflictStrategy,
   DirectoryListing,
   FileEntry,
+  FormatFilter,
+  FormatFilterOption,
   LayoutNode,
   PanelId,
   PanelRef,
@@ -111,10 +113,13 @@ interface DirectoryChangedPayload {
   path: string;
 }
 
+const DEFAULT_FORMAT_FILTER: FormatFilter = "all";
+
 function App() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [listings, setListings] = useState<ListingMap>({});
+  const [formatFilters, setFormatFilters] = useState<Record<string, FormatFilter>>({});
   const [loading, setLoading] = useState<LoadingMap>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -160,6 +165,15 @@ function App() {
       void logAction(action, details).catch(() => undefined);
     },
     [],
+  );
+
+  const getDisplayListing = useCallback(
+    (tab: TabState): DirectoryListing | null =>
+      filterListingByFormat(
+        listings[tab.id] ?? null,
+        formatFilters[tab.id] ?? DEFAULT_FORMAT_FILTER,
+      ),
+    [formatFilters, listings],
   );
 
   const requestConfirmation = useCallback((nextConfirmation: ConfirmationState) => {
@@ -404,6 +418,7 @@ function App() {
 
     setListings((current) => pruneByKey(current, validIds));
     setLoading((current) => pruneByKey(current, validIds));
+    setFormatFilters((current) => pruneByKey(current, validIds));
   }, [session?.left.tabs, session?.right.tabs]);
 
   const persistSession = useCallback(
@@ -785,7 +800,7 @@ function App() {
 
       const panelId = session.activePanel;
       const tab = activeTab(session[panelId]);
-      const entries = listings[tab.id]?.entries ?? [];
+      const entries = getDisplayListing(tab)?.entries ?? [];
       if (entries.length === 0) {
         return;
       }
@@ -806,7 +821,7 @@ function App() {
           : previous,
       );
     },
-    [listings, recordAction, session],
+    [getDisplayListing, recordAction, session],
   );
 
   const typeAheadSelect = useCallback(
@@ -816,7 +831,7 @@ function App() {
       }
       const panelId = session.activePanel;
       const tab = activeTab(session[panelId]);
-      const entries = listings[tab.id]?.entries ?? [];
+      const entries = getDisplayListing(tab)?.entries ?? [];
       if (entries.length === 0) {
         return;
       }
@@ -828,7 +843,7 @@ function App() {
         selectEntryByIndex(index);
       }
     },
-    [listings, selectEntryByIndex, session],
+    [getDisplayListing, selectEntryByIndex, session],
   );
 
   const moveSelection = useCallback(
@@ -840,7 +855,7 @@ function App() {
 
       const panelId = session.activePanel;
       const tab = activeTab(session[panelId]);
-      const entries = listings[tab.id]?.entries ?? [];
+      const entries = getDisplayListing(tab)?.entries ?? [];
       if (entries.length === 0) {
         return;
       }
@@ -849,7 +864,7 @@ function App() {
       const fallbackIndex = delta > 0 ? -1 : entries.length;
       selectEntryByIndex((currentIndex >= 0 ? currentIndex : fallbackIndex) + delta);
     },
-    [listings, recordAction, selectEntryByIndex, session],
+    [getDisplayListing, recordAction, selectEntryByIndex, session],
   );
 
   const moveSelectionPage = useCallback(
@@ -872,9 +887,9 @@ function App() {
     }
 
     const tab = activeTab(session[session.activePanel]);
-    const entries = listings[tab.id]?.entries ?? [];
+    const entries = getDisplayListing(tab)?.entries ?? [];
     selectEntryByIndex(entries.length - 1);
-  }, [listings, recordAction, selectEntryByIndex, session]);
+  }, [getDisplayListing, recordAction, selectEntryByIndex, session]);
 
   const openEntry = useCallback(
     async (panelId: PanelId, entry: FileEntry) => {
@@ -905,12 +920,12 @@ function App() {
       return;
     }
     const tab = activeTab(session[session.activePanel]);
-    const listing = listings[tab.id];
+    const listing = getDisplayListing(tab);
     const entry = findSelectedEntry(tab, listing);
     if (entry) {
       void openEntry(session.activePanel, entry);
     }
-  }, [listings, openEntry, recordAction, session]);
+  }, [getDisplayListing, openEntry, recordAction, session]);
 
   const openFolderInNewTab = useCallback((panelId: PanelId, path: string) => {
     recordAction("open_folder_in_new_tab", { panelId, path });
@@ -941,11 +956,11 @@ function App() {
 
     const panelId = session.activePanel;
     const tab = activeTab(session[panelId]);
-    const entry = findSelectedEntry(tab, listings[tab.id] ?? null);
+    const entry = findSelectedEntry(tab, getDisplayListing(tab));
     if (entry?.isDir) {
       openFolderInNewTab(panelId, entry.path);
     }
-  }, [listings, openFolderInNewTab, recordAction, session]);
+  }, [getDisplayListing, openFolderInNewTab, recordAction, session]);
 
   const openEntryContextMenu = useCallback(
     (panelId: PanelId, entry: FileEntry, position: { x: number; y: number }) => {
@@ -1023,10 +1038,10 @@ function App() {
     }
 
     const tab = activeTab(session[session.activePanel]);
-    const selectedPaths = visibleSelectedPaths(tab, listings[tab.id] ?? null);
+    const selectedPaths = visibleSelectedPaths(tab, getDisplayListing(tab));
     setContextMenu(null);
     void copyPathsToClipboard(selectedPaths, "selection");
-  }, [copyPathsToClipboard, listings, session]);
+  }, [copyPathsToClipboard, getDisplayListing, session]);
 
   const startPathDrag = useCallback(
     (panelId: PanelId, entry: FileEntry, event: DragEvent<HTMLDivElement>) => {
@@ -1043,7 +1058,7 @@ function App() {
 
       const tab = activeTab(session[panelId]);
       const selectedPaths = tab.selectedPaths.includes(entry.path)
-        ? visibleSelectedPaths(tab, listings[tab.id] ?? null)
+        ? visibleSelectedPaths(tab, getDisplayListing(tab))
         : [];
       const dragPaths = selectedPaths.length > 0 ? selectedPaths : [entry.path];
       const terminalText = formatPathsForTerminal(dragPaths, platform);
@@ -1070,7 +1085,7 @@ function App() {
           : previous,
       );
     },
-    [listings, platform, recordAction, session],
+    [getDisplayListing, platform, recordAction, session],
   );
 
   const runTransfer = useCallback(
@@ -1089,7 +1104,7 @@ function App() {
       const destinationPanel = oppositePanel(sourcePanel);
       const sourceTab = activeTab(session[sourcePanel]);
       const destinationTab = activeTab(session[destinationPanel]);
-      const items = visibleSelectedPaths(sourceTab, listings[sourceTab.id] ?? null);
+      const items = visibleSelectedPaths(sourceTab, getDisplayListing(sourceTab));
 
       if (items.length === 0) {
         reportNotice("Select one or more items first.");
@@ -1131,7 +1146,7 @@ function App() {
         reportNotice(errorToMessage(error));
       }
     },
-    [listings, recordAction, refreshVisiblePanels, reportNotice, requestConflictStrategy, session],
+    [getDisplayListing, recordAction, refreshVisiblePanels, reportNotice, requestConflictStrategy, session],
   );
 
   const trashSelected = useCallback(async () => {
@@ -1140,7 +1155,7 @@ function App() {
       return;
     }
     const tab = activeTab(session[session.activePanel]);
-    const selectedPaths = visibleSelectedPaths(tab, listings[tab.id] ?? null);
+    const selectedPaths = visibleSelectedPaths(tab, getDisplayListing(tab));
     if (selectedPaths.length === 0) {
       reportNotice("Select one or more items first.");
       return;
@@ -1169,7 +1184,7 @@ function App() {
       });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, recordAction, refreshPanel, reportNotice, requestConfirmation, session, trashName]);
+  }, [getDisplayListing, recordAction, refreshPanel, reportNotice, requestConfirmation, session, trashName]);
 
   const deleteSelectedPermanently = useCallback(async () => {
     recordAction("permanent_delete_requested", {
@@ -1179,7 +1194,7 @@ function App() {
       return;
     }
     const tab = activeTab(session[session.activePanel]);
-    const selectedPaths = visibleSelectedPaths(tab, listings[tab.id] ?? null);
+    const selectedPaths = visibleSelectedPaths(tab, getDisplayListing(tab));
     if (selectedPaths.length === 0) {
       reportNotice("Select one or more items first.");
       return;
@@ -1211,7 +1226,7 @@ function App() {
       });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, recordAction, refreshPanel, reportNotice, requestConfirmation, session]);
+  }, [getDisplayListing, recordAction, refreshPanel, reportNotice, requestConfirmation, session]);
 
   const renameSelected = useCallback(() => {
     recordAction("rename_requested", { panelId: session?.activePanel ?? null });
@@ -1220,7 +1235,7 @@ function App() {
     }
     const panelId = session.activePanel;
     const tab = activeTab(session[panelId]);
-    const listing = listings[tab.id] ?? null;
+    const listing = getDisplayListing(tab);
     const selectedPaths = visibleSelectedPaths(tab, listing);
     const entry = findSelectedEntry(tab, listing);
     if (selectedPaths.length !== 1 || !entry) {
@@ -1232,7 +1247,7 @@ function App() {
     recordAction("rename_started", { panelId, path: entry.path });
     setRenameState({ panelId, path: entry.path, name: entry.name });
     reportNotice(null);
-  }, [listings, recordAction, reportNotice, session]);
+  }, [getDisplayListing, recordAction, reportNotice, session]);
 
   const commitRename = useCallback(async () => {
     if (!renameState) {
@@ -1333,7 +1348,7 @@ function App() {
       return;
     }
     const tab = activeTab(session[session.activePanel]);
-    const entry = findSelectedEntry(tab, listings[tab.id] ?? null);
+    const entry = findSelectedEntry(tab, getDisplayListing(tab));
     if (!entry) {
       recordAction("preview_blocked", { reason: "no_selection" });
       reportNotice("Select an item to preview.");
@@ -1351,7 +1366,7 @@ function App() {
       });
       reportNotice(errorToMessage(error));
     }
-  }, [listings, recordAction, reportNotice, session]);
+  }, [getDisplayListing, recordAction, reportNotice, session]);
 
   const toggleHiddenFiles = useCallback(() => {
     recordAction("toggle_hidden_files", { visible: !showHiddenFiles });
@@ -1364,6 +1379,51 @@ function App() {
         : previous,
     );
   }, [recordAction, showHiddenFiles]);
+
+  const changeFormatFilter = useCallback(
+    (panelId: PanelId, filter: FormatFilter) => {
+      if (!session) {
+        return;
+      }
+
+      const tab = activeTab(session[panelId]);
+      recordAction("change_format_filter", { panelId, filter });
+      setContextMenu(null);
+      setRenameState(null);
+      setFormatFilters((current) => {
+        const next = { ...current };
+        if (filter === DEFAULT_FORMAT_FILTER) {
+          delete next[tab.id];
+        } else {
+          next[tab.id] = filter;
+        }
+        return next;
+      });
+      setSession((previous) => {
+        if (!previous) {
+          return previous;
+        }
+
+        const currentTab = activeTab(previous[panelId]);
+        const filteredListing = filterListingByFormat(
+          listings[currentTab.id] ?? null,
+          filter,
+        );
+        if (!filteredListing) {
+          return { ...previous, activePanel: panelId };
+        }
+
+        const visiblePaths = new Set(
+          filteredListing.entries.map((entry) => entry.path),
+        );
+        return updateActiveTab({ ...previous, activePanel: panelId }, panelId, (current) => ({
+          ...current,
+          selectedPaths: current.selectedPaths.filter((path) => visiblePaths.has(path)),
+        }));
+      });
+    },
+    [listings, recordAction, session],
+  );
 
   const shortcutHandlers = useMemo(
     () => ({
@@ -1477,12 +1537,17 @@ function App() {
 
     const panelId: PanelId = ref;
     const panelState = session[panelId];
+    const tab = activeTab(panelState);
+    const rawListing = listings[tab.id] ?? null;
+    const formatFilter = formatFilters[tab.id] ?? DEFAULT_FORMAT_FILTER;
     return (
       <FilePanel
         dragHandlers={dragHandlers}
+        formatFilter={formatFilter}
+        formatOptions={buildFormatFilterOptions(rawListing, formatFilter)}
         isActive={session.activePanel === panelId}
-        listing={listings[activeTab(panelState).id] ?? null}
-        loading={Boolean(loading[activeTab(panelState).id])}
+        listing={filterListingByFormat(rawListing, formatFilter)}
+        loading={Boolean(loading[tab.id])}
         panel={panelState}
         panelId={panelId}
         platform={platform}
@@ -1491,6 +1556,7 @@ function App() {
         onCreateFolder={createFolderInPanel}
         onEntryContextMenu={openEntryContextMenu}
         onEntryDragStart={startPathDrag}
+        onFormatFilterChange={changeFormatFilter}
         onGoBack={goBack}
         onGoForward={goForward}
         onGoParent={goParent}
@@ -1751,6 +1817,108 @@ function replaceHistoryPath(tab: TabState, path: string): string[] {
   const history = [...tab.history];
   history[tab.historyIndex] = path;
   return history;
+}
+
+function filterListingByFormat(
+  listing: DirectoryListing | null,
+  filter: FormatFilter,
+): DirectoryListing | null {
+  if (!listing || filter === "all") {
+    return listing;
+  }
+
+  return {
+    ...listing,
+    entries: listing.entries.filter((entry) => entryMatchesFormatFilter(entry, filter)),
+  };
+}
+
+function entryMatchesFormatFilter(entry: FileEntry, filter: FormatFilter): boolean {
+  if (filter === "all") {
+    return true;
+  }
+
+  if (filter === "folders") {
+    return entry.isDir;
+  }
+
+  if (filter === "noExtension") {
+    return !entry.isDir && !entry.extension;
+  }
+
+  return !entry.isDir && entry.extension === filter.slice("extension:".length);
+}
+
+function buildFormatFilterOptions(
+  listing: DirectoryListing | null,
+  currentFilter: FormatFilter,
+): FormatFilterOption[] {
+  const extensionCounts = new Map<string, number>();
+  let folderCount = 0;
+  let noExtensionCount = 0;
+
+  for (const entry of listing?.entries ?? []) {
+    if (entry.isDir) {
+      folderCount += 1;
+    } else if (entry.extension) {
+      extensionCounts.set(entry.extension, (extensionCounts.get(entry.extension) ?? 0) + 1);
+    } else {
+      noExtensionCount += 1;
+    }
+  }
+
+  const options: FormatFilterOption[] = [
+    { value: "all", label: "All formats", count: listing?.entries.length ?? 0 },
+  ];
+
+  if (folderCount > 0) {
+    options.push({ value: "folders", label: "Folders", count: folderCount });
+  }
+
+  if (noExtensionCount > 0) {
+    options.push({
+      value: "noExtension",
+      label: "No extension",
+      count: noExtensionCount,
+    });
+  }
+
+  for (const [extension, count] of Array.from(extensionCounts).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    options.push({
+      value: `extension:${extension}`,
+      label: `.${extension}`,
+      count,
+    });
+  }
+
+  if (!options.some((option) => option.value === currentFilter)) {
+    options.push({
+      value: currentFilter,
+      label: formatFilterLabel(currentFilter),
+      count: 0,
+    });
+  }
+
+  return options;
+}
+
+function formatFilterLabel(filter: FormatFilter): string {
+  if (filter === "all") {
+    return "All formats";
+  }
+
+  if (filter === "folders") {
+    return "Folders";
+  }
+
+  if (filter === "noExtension") {
+    return "No extension";
+  }
+
+  const extension = filter.slice("extension:".length);
+  return extension ? `.${extension}` : "Unknown format";
 }
 
 function findSelectedEntry(tab: TabState, listing: DirectoryListing | null): FileEntry | null {

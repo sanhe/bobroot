@@ -8,6 +8,7 @@ import {
   FolderPlus,
   GripVertical,
   HardDrive,
+  ListFilter,
   Plus,
   RefreshCw,
   X,
@@ -16,7 +17,14 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 import { basename, formatBytes, formatDate } from "../lib/format";
 import type { AppPlatform } from "../lib/platform";
-import type { DirectoryListing, FileEntry, PanelId, PanelState } from "../lib/types";
+import type {
+  DirectoryListing,
+  FileEntry,
+  FormatFilter,
+  FormatFilterOption,
+  PanelId,
+  PanelState,
+} from "../lib/types";
 import { activeTab } from "../lib/tabState";
 import { IconButton } from "./IconButton";
 import type { LayoutDragHandlers } from "./Layout";
@@ -25,6 +33,8 @@ interface FilePanelProps {
   panelId: PanelId;
   panel: PanelState;
   listing: DirectoryListing | null;
+  formatFilter: FormatFilter;
+  formatOptions: FormatFilterOption[];
   loading: boolean;
   isActive: boolean;
   platform: AppPlatform;
@@ -36,6 +46,7 @@ interface FilePanelProps {
   onGoForward: (panelId: PanelId) => void;
   onGoParent: (panelId: PanelId) => void;
   onRefresh: (panelId: PanelId) => void;
+  onFormatFilterChange: (panelId: PanelId, filter: FormatFilter) => void;
   onSelect: (panelId: PanelId, path: string, additive: boolean) => void;
   onOpenEntry: (panelId: PanelId, entry: FileEntry) => void;
   onEntryDragStart: (
@@ -62,6 +73,8 @@ export function FilePanel({
   panelId,
   panel,
   listing,
+  formatFilter,
+  formatOptions,
   loading,
   isActive,
   platform,
@@ -73,6 +86,7 @@ export function FilePanel({
   onGoForward,
   onGoParent,
   onRefresh,
+  onFormatFilterChange,
   onSelect,
   onOpenEntry,
   onEntryDragStart,
@@ -174,6 +188,22 @@ export function FilePanel({
           platform={platform}
           onNavigate={(path) => onNavigateToPath(panelId, path)}
         />
+        <label className="format-filter" title="Filter visible file format">
+          <ListFilter size={14} />
+          <select
+            aria-label="File format filter"
+            onChange={(event) =>
+              onFormatFilterChange(panelId, event.target.value as FormatFilter)
+            }
+            value={formatFilter}
+          >
+            {formatOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {formatOptionLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="file-table" role="table" aria-label={`${panelId} files`}>
@@ -185,7 +215,9 @@ export function FilePanel({
         <div className="file-list">
           {loading ? <div className="empty-state">Loading...</div> : null}
           {!loading && listing?.entries.length === 0 ? (
-            <div className="empty-state">Empty folder</div>
+            <div className="empty-state">
+              {formatFilter === "all" ? "Empty folder" : "No items match this format"}
+            </div>
           ) : null}
           {!loading
             ? listing?.entries.map((entry) => (
@@ -224,6 +256,10 @@ export function FilePanel({
       </div>
     </section>
   );
+}
+
+function formatOptionLabel(option: FormatFilterOption): string {
+  return `${option.label} (${option.count})`;
 }
 
 interface PathLabelProps {

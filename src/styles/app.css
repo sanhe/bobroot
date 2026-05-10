@@ -413,6 +413,38 @@ body.layout-dragging {
   color: #0b5cab;
 }
 
+.format-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 178px;
+  flex: 0 0 auto;
+  color: #657080;
+}
+
+.format-filter svg {
+  flex: 0 0 auto;
+}
+
+.format-filter select {
+  width: 142px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid #cfd6df;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #30343b;
+  font: inherit;
+  font-size: 12px;
+}
+
+.format-filter select:focus {
+  border-color: #2f7dd1;
+  outline: 2px solid rgba(47, 125, 209, 0.22);
+  outline-offset: 1px;
+}
+
 .file-table {
   display: grid;
   grid-template-rows: 30px 1fr;
