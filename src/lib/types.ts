@@ -1,6 +1,6 @@
 export type PanelId = "left" | "right";
 
-export type PanelRef = PanelId | "terminal";
+export type PanelRef = PanelId | "terminal" | "agent";
 
 export type SplitDirection = "row" | "column";
 

@@ -2,7 +2,7 @@ import type { LayoutNode, PanelRef, SplitDirection } from "./types";
 
 export type DropEdge = "top" | "right" | "bottom" | "left";
 
-export const ALL_PANEL_REFS: PanelRef[] = ["left", "right", "terminal"];
+export const ALL_PANEL_REFS: PanelRef[] = ["left", "right", "terminal", "agent"];
 
 export function defaultLayout(): LayoutNode {
   return {
@@ -19,7 +19,15 @@ export function defaultLayout(): LayoutNode {
           { kind: "leaf", ref: "right" },
         ],
       },
-      { kind: "leaf", ref: "terminal" },
+      {
+        kind: "split",
+        direction: "row",
+        sizes: [1, 1],
+        children: [
+          { kind: "leaf", ref: "terminal" },
+          { kind: "leaf", ref: "agent" },
+        ],
+      },
     ],
   };
 }
@@ -45,7 +53,15 @@ export function buildLayoutFromLegacy(legacy: {
           { kind: "leaf", ref: "right" },
         ],
       },
-      { kind: "leaf", ref: "terminal" },
+      {
+        kind: "split",
+        direction: "row",
+        sizes: [1, 1],
+        children: [
+          { kind: "leaf", ref: "terminal" },
+          { kind: "leaf", ref: "agent" },
+        ],
+      },
     ],
   };
 
@@ -55,6 +71,7 @@ export function buildLayoutFromLegacy(legacy: {
       left: true,
       right: legacy.rightPanelVisible !== false,
       terminal: Boolean(legacy.terminalVisible),
+      agent: false,
     },
   };
 }
@@ -115,7 +132,7 @@ function appendLeafToRoot(node: LayoutNode, ref: PanelRef): LayoutNode {
 }
 
 function defaultSizeFor(ref: PanelRef): number {
-  return ref === "terminal" ? 1 : 1.5;
+  return ref === "terminal" || ref === "agent" ? 1 : 1.5;
 }
 
 function removeUnknownRefs(node: LayoutNode): LayoutNode | null {

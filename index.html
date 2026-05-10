@@ -88,6 +88,16 @@
             ) {
               return null;
             }
+            if (cmd === "start_agent_process") {
+              return "mock-agent-process";
+            }
+            if (
+              cmd === "write_agent_process_data" ||
+              cmd === "resize_agent_process" ||
+              cmd === "stop_agent_process"
+            ) {
+              return null;
+            }
             if (cmd === "list_directory") {
               const entries = directories[args.path];
               if (!entries) {

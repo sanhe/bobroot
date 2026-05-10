@@ -8,6 +8,16 @@ import type {
   TerminalCommandResult,
 } from "./types";
 
+export interface AgentProcessStartRequest {
+  providerId: string;
+  label: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  cols: number;
+  rows: number;
+}
+
 const BROWSER_BACKEND_MESSAGE =
   "Desktop filesystem commands are unavailable in browser preview. Run the app with pnpm tauri:dev to use local files.";
 
@@ -129,6 +139,29 @@ export async function resolveTerminalDirectory(
   target: string,
 ): Promise<string> {
   return invokeDesktop("resolve_terminal_directory", { cwd, target });
+}
+
+export async function startAgentProcess(request: AgentProcessStartRequest): Promise<string> {
+  return invokeDesktop("start_agent_process", { request });
+}
+
+export async function writeAgentProcessData(
+  sessionId: string,
+  data: string,
+): Promise<void> {
+  return invokeDesktop("write_agent_process_data", { sessionId, data });
+}
+
+export async function resizeAgentProcess(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  return invokeDesktop("resize_agent_process", { sessionId, cols, rows });
+}
+
+export async function stopAgentProcess(sessionId: string): Promise<void> {
+  return invokeDesktop("stop_agent_process", { sessionId });
 }
 
 export async function loadSession(): Promise<SessionData | null> {

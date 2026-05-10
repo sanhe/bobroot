@@ -97,6 +97,7 @@ function resolveLayoutAndVisibility(session: {
       left: session.visibility?.left ?? true,
       right: session.visibility?.right ?? true,
       terminal: session.visibility?.terminal ?? false,
+      agent: session.visibility?.agent ?? false,
     };
     return { layout, visibility };
   }

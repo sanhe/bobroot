@@ -3,6 +3,7 @@ import type { DragEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
+  Bot,
   Copy,
   Eye,
   EyeOff,
@@ -70,6 +71,7 @@ import type {
 import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { ConfirmationDialog } from "./components/ConfirmationDialog";
+import { AgentPanel } from "./components/AgentPanel";
 import { FilePanel } from "./components/FilePanel";
 import { IconButton } from "./components/IconButton";
 import { Layout, type LayoutDragHandlers } from "./components/Layout";
@@ -144,6 +146,7 @@ function App() {
   const activePanelId = session?.activePanel ?? "left";
   const rightPanelVisible = session?.visibility.right ?? true;
   const terminalVisible = session?.visibility.terminal ?? false;
+  const agentVisible = session?.visibility.agent ?? false;
   const showHiddenFiles = session?.showHiddenFiles ?? false;
 
   const reportNotice = useCallback((message: string | null) => {
@@ -344,7 +347,7 @@ function App() {
               activePanel: "left",
               showHiddenFiles: false,
               layout: defaultLayout(),
-              visibility: { left: true, right: true, terminal: false },
+              visibility: { left: true, right: true, terminal: false, agent: false },
               window: null,
             };
 
@@ -614,6 +617,32 @@ function App() {
         ? {
             ...previous,
             visibility: { ...previous.visibility, terminal: false },
+          }
+        : previous,
+    );
+  }, [recordAction]);
+
+  const toggleAgent = useCallback(() => {
+    recordAction("toggle_agent_panel", { visible: !agentVisible });
+    setContextMenu(null);
+    setRenameState(null);
+    setSession((previous) =>
+      previous
+        ? {
+            ...previous,
+            visibility: { ...previous.visibility, agent: !previous.visibility.agent },
+          }
+        : previous,
+    );
+  }, [agentVisible, recordAction]);
+
+  const closeAgent = useCallback(() => {
+    recordAction("close_agent_panel");
+    setSession((previous) =>
+      previous
+        ? {
+            ...previous,
+            visibility: { ...previous.visibility, agent: false },
           }
         : previous,
     );
@@ -1408,6 +1437,19 @@ function App() {
         />
       );
     }
+
+    if (ref === "agent") {
+      return (
+        <AgentPanel
+          dragHandlers={dragHandlers}
+          session={session}
+          onClose={closeAgent}
+          onLogAction={recordAction}
+          onNotice={reportNotice}
+        />
+      );
+    }
+
     const panelId: PanelId = ref;
     const panelState = session[panelId];
     return (
@@ -1484,6 +1526,13 @@ function App() {
             onClick={toggleTerminal}
           >
             <TerminalIcon size={16} />
+          </IconButton>
+          <IconButton
+            label={agentVisible ? "Hide agent" : "Show agent"}
+            className={agentVisible ? "pressed" : ""}
+            onClick={toggleAgent}
+          >
+            <Bot size={16} />
           </IconButton>
           <IconButton label="Rename" onClick={() => void renameSelected()}>
             <Pencil size={16} />

@@ -178,6 +178,45 @@ struct TerminalExitPayload {
     message: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentProcessStartRequest {
+    provider_id: String,
+    label: String,
+    command: String,
+    args: Vec<String>,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentOutputPayload {
+    session_id: String,
+    provider_id: String,
+    data: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentExitPayload {
+    session_id: String,
+    provider_id: String,
+    status: Option<u32>,
+    message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentEventPayload {
+    session_id: String,
+    provider_id: String,
+    level: String,
+    message: String,
+    timestamp: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DirectoryChangedPayload {
@@ -238,6 +277,34 @@ impl Default for TerminalSessions {
     fn default() -> Self {
         Self {
             inner: Arc::new(TerminalSessionsInner {
+                next_id: AtomicU64::new(1),
+                sessions: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AgentProcessSessions {
+    inner: Arc<AgentProcessSessionsInner>,
+}
+
+struct AgentProcessSessionsInner {
+    next_id: AtomicU64,
+    sessions: Mutex<HashMap<String, AgentProcessSession>>,
+}
+
+struct AgentProcessSession {
+    provider_id: String,
+    master: Box<dyn MasterPty + Send>,
+    writer: Mutex<Box<dyn Write + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+}
+
+impl Default for AgentProcessSessions {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(AgentProcessSessionsInner {
                 next_id: AtomicU64::new(1),
                 sessions: Mutex::new(HashMap::new()),
             }),
@@ -749,6 +816,209 @@ fn resolve_terminal_directory(cwd: String, target: String) -> CommandResult<Stri
 }
 
 #[tauri::command]
+fn start_agent_process(
+    app: AppHandle,
+    state: State<'_, AgentProcessSessions>,
+    request: AgentProcessStartRequest,
+) -> CommandResult<String> {
+    let command_name = request.command.trim();
+    if command_name.is_empty() {
+        return Err(CommandError::new(
+            "invalid_provider",
+            "Provider command is required",
+        ));
+    }
+
+    let provider_id = request.provider_id.trim();
+    if provider_id.is_empty() {
+        return Err(CommandError::new(
+            "invalid_provider",
+            "Provider id is required",
+        ));
+    }
+
+    let working_dir = resolve_existing_directory(&request.cwd)?;
+    let size = terminal_size(request.cols, request.rows);
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(size)
+        .map_err(|error| terminal_pty_error("open_agent_pty", error))?;
+
+    let mut command = CommandBuilder::new(command_name);
+    command.args(&request.args);
+    command.cwd(working_dir.as_os_str());
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("BOBROOT_AGENT_PROVIDER", provider_id);
+    command.env("BOBROOT_ACTIVE_FOLDER", working_dir.as_os_str());
+
+    let mut child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|error| terminal_pty_error("spawn_agent", error))?;
+    let killer = child.clone_killer();
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|error| terminal_pty_error("clone_agent_reader", error))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| terminal_pty_error("open_agent_writer", error))?;
+
+    let session_id = format!(
+        "agent-{}",
+        state.inner.next_id.fetch_add(1, Ordering::Relaxed)
+    );
+    let session = AgentProcessSession {
+        provider_id: provider_id.to_string(),
+        master: pair.master,
+        writer: Mutex::new(writer),
+        killer: Mutex::new(killer),
+    };
+
+    {
+        let mut sessions = lock_agent_process_sessions(&state.inner)?;
+        sessions.insert(session_id.clone(), session);
+    }
+
+    emit_agent_event(
+        &app,
+        &session_id,
+        provider_id,
+        "info",
+        &format!("Started {}", request.label.trim()),
+    );
+
+    let output_session_id = session_id.clone();
+    let output_provider_id = provider_id.to_string();
+    let output_app = app.clone();
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(length) => {
+                    let data = String::from_utf8_lossy(&buffer[..length]).into_owned();
+                    let _ = output_app.emit(
+                        "agent-output",
+                        AgentOutputPayload {
+                            session_id: output_session_id.clone(),
+                            provider_id: output_provider_id.clone(),
+                            data,
+                        },
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let exit_session_id = session_id.clone();
+    let exit_provider_id = provider_id.to_string();
+    let exit_app = app;
+    let sessions = state.inner.clone();
+    thread::spawn(move || {
+        let wait_result = child.wait();
+        if let Ok(mut sessions) = sessions.sessions.lock() {
+            sessions.remove(&exit_session_id);
+        }
+
+        let payload = match wait_result {
+            Ok(status) => AgentExitPayload {
+                session_id: exit_session_id.clone(),
+                provider_id: exit_provider_id.clone(),
+                status: Some(status.exit_code()),
+                message: status.signal().map(ToOwned::to_owned),
+            },
+            Err(error) => AgentExitPayload {
+                session_id: exit_session_id.clone(),
+                provider_id: exit_provider_id.clone(),
+                status: None,
+                message: Some(error.to_string()),
+            },
+        };
+        let message = payload
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("Exited with {}", payload.status.unwrap_or_default()));
+        emit_agent_event(
+            &exit_app,
+            &exit_session_id,
+            &exit_provider_id,
+            "info",
+            &message,
+        );
+        let _ = exit_app.emit("agent-exit", payload);
+    });
+
+    Ok(session_id)
+}
+
+#[tauri::command]
+fn write_agent_process_data(
+    state: State<'_, AgentProcessSessions>,
+    session_id: String,
+    data: String,
+) -> CommandResult<()> {
+    let mut sessions = lock_agent_process_sessions(&state.inner)?;
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| CommandError::new("not_found", "Agent process is not running"))?;
+    let mut writer = session
+        .writer
+        .lock()
+        .map_err(|_| CommandError::new("agent_state", "Agent writer is unavailable"))?;
+    writer.write_all(data.as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+#[tauri::command]
+fn resize_agent_process(
+    state: State<'_, AgentProcessSessions>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> CommandResult<()> {
+    let sessions = lock_agent_process_sessions(&state.inner)?;
+    if let Some(session) = sessions.get(&session_id) {
+        session
+            .master
+            .resize(terminal_size(cols, rows))
+            .map_err(|error| terminal_pty_error("resize_agent_pty", error))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_agent_process(
+    app: AppHandle,
+    state: State<'_, AgentProcessSessions>,
+    session_id: String,
+) -> CommandResult<()> {
+    let session = {
+        let mut sessions = lock_agent_process_sessions(&state.inner)?;
+        sessions.remove(&session_id)
+    };
+
+    if let Some(session) = session {
+        emit_agent_event(
+            &app,
+            &session_id,
+            &session.provider_id,
+            "info",
+            "Stopped agent process",
+        );
+        if let Ok(mut killer) = session.killer.lock() {
+            let _ = killer.kill();
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn load_session() -> CommandResult<Option<SessionData>> {
     let path = session_file_path()?;
     if !path.exists() {
@@ -1001,7 +1271,9 @@ fn copy_symlink_platform(_source: &Path, target: &Path, link_target: &Path) -> C
 
 #[cfg(windows)]
 fn copy_symlink_platform(source: &Path, target: &Path, link_target: &Path) -> CommandResult<()> {
-    let is_dir = fs::metadata(source).map(|meta| meta.is_dir()).unwrap_or(false);
+    let is_dir = fs::metadata(source)
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false);
 
     if is_dir {
         std::os::windows::fs::symlink_dir(link_target, target)?;
@@ -1294,6 +1566,34 @@ fn lock_terminal_sessions(
         .map_err(|_| CommandError::new("terminal_state", "Terminal state is unavailable"))
 }
 
+fn lock_agent_process_sessions(
+    sessions: &Arc<AgentProcessSessionsInner>,
+) -> CommandResult<std::sync::MutexGuard<'_, HashMap<String, AgentProcessSession>>> {
+    sessions
+        .sessions
+        .lock()
+        .map_err(|_| CommandError::new("agent_state", "Agent state is unavailable"))
+}
+
+fn emit_agent_event(
+    app: &AppHandle,
+    session_id: &str,
+    provider_id: &str,
+    level: &str,
+    message: &str,
+) {
+    let _ = app.emit(
+        "agent-event",
+        AgentEventPayload {
+            session_id: session_id.to_string(),
+            provider_id: provider_id.to_string(),
+            level: level.to_string(),
+            message: message.to_string(),
+            timestamp: current_timestamp_millis(),
+        },
+    );
+}
+
 fn terminal_pty_error(kind: &str, error: impl std::fmt::Display) -> CommandError {
     CommandError::new(kind, error.to_string())
 }
@@ -1413,6 +1713,7 @@ fn current_timestamp_millis() -> u64 {
 pub fn run() {
     tauri::Builder::default()
         .manage(TerminalSessions::default())
+        .manage(AgentProcessSessions::default())
         .setup(|app| {
             let directory_watcher = DirectoryWatcherState::new(app.handle().clone());
             app.manage(directory_watcher);
@@ -1437,6 +1738,10 @@ pub fn run() {
             resize_terminal_session,
             stop_terminal_session,
             resolve_terminal_directory,
+            start_agent_process,
+            write_agent_process_data,
+            resize_agent_process,
+            stop_agent_process,
             load_session,
             save_session,
             append_action_log

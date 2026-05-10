@@ -779,6 +779,377 @@ body.terminal-resizing * {
   overflow-y: auto;
 }
 
+.agent-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #d9dee6;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #20252c;
+  overflow: hidden;
+}
+
+.agent-header {
+  display: grid;
+  grid-template-columns: auto minmax(130px, auto) minmax(170px, 240px) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 6px 9px;
+  border-bottom: 1px solid #e3e7ee;
+  background: #f9fafc;
+}
+
+.agent-title,
+.agent-header-actions,
+.agent-section-title,
+.agent-section-heading,
+.agent-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.agent-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.agent-status {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: #657080;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.agent-status.running {
+  background: #e4f8ed;
+  color: #1f7a49;
+}
+
+.agent-status.starting {
+  background: #fff5db;
+  color: #8b6111;
+}
+
+.agent-status.failed {
+  background: #ffe7e7;
+  color: #a43838;
+}
+
+.agent-provider-select,
+.agent-field select,
+.agent-field textarea,
+.agent-composer textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cfd6df;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #20252c;
+  font: inherit;
+}
+
+.agent-provider-select,
+.agent-field select {
+  height: 30px;
+  padding: 0 8px;
+}
+
+.agent-header-actions {
+  justify-self: end;
+}
+
+.primary-icon-button {
+  border-color: #9bb7dc;
+  background: #e9f2ff;
+  color: #0b5cab;
+}
+
+.agent-content {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.agent-sidebar {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid #e3e7ee;
+  overflow: auto;
+}
+
+.agent-sidebar-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-section-title {
+  min-width: 0;
+  color: #545d69;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.agent-section-heading {
+  justify-content: space-between;
+}
+
+.agent-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.agent-capabilities span {
+  min-height: 23px;
+  padding: 4px 7px;
+  border: 1px solid #dbe1e9;
+  border-radius: 999px;
+  background: #f6f8fb;
+  color: #46515f;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.agent-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #535d69;
+  font-size: 12px;
+}
+
+.agent-field textarea,
+.agent-composer textarea {
+  resize: none;
+  padding: 8px;
+  line-height: 1.35;
+  outline: none;
+}
+
+.agent-context-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.agent-context-list div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.agent-context-list dt,
+.agent-context-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.agent-context-list dt {
+  color: #727b87;
+}
+
+.agent-context-list dd {
+  color: #252b33;
+}
+
+.agent-attachments,
+.agent-event-log {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-attachment {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 4px 5px;
+  border: 1px solid #dfe4eb;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.agent-attachment img {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.agent-attachment span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.agent-attachment button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #6d7682;
+}
+
+.agent-attachment button:hover {
+  background: #edf1f6;
+  color: #252b33;
+}
+
+.agent-log-section {
+  min-height: 120px;
+}
+
+.agent-event-log {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.agent-log-entry {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 7px;
+  background: #f6f8fb;
+  color: #4b5563;
+  font-size: 11px;
+}
+
+.agent-log-entry.error {
+  background: #fff0f0;
+  color: #9c3030;
+}
+
+.agent-log-entry time {
+  color: #778291;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.agent-empty {
+  color: #7a828d;
+  font-size: 12px;
+}
+
+.agent-chat {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.agent-messages {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.agent-welcome {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 180px;
+  color: #6c7480;
+  text-align: center;
+}
+
+.agent-welcome strong {
+  color: #242a31;
+}
+
+.agent-welcome span {
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-message {
+  display: grid;
+  gap: 5px;
+  max-width: min(760px, 92%);
+}
+
+.agent-message.user {
+  justify-self: end;
+}
+
+.agent-message.assistant,
+.agent-message.system {
+  justify-self: start;
+}
+
+.agent-message-role {
+  color: #727b87;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.agent-message pre {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e0e5ec;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #20252c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-message.user pre {
+  border-color: #b9d2f2;
+  background: #e9f2ff;
+}
+
+.agent-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  padding: 10px 12px;
+  border-top: 1px solid #e3e7ee;
+  background: #f9fafc;
+}
+
+.agent-composer textarea {
+  min-height: 72px;
+}
+
+.agent-composer-actions {
+  align-content: end;
+  align-items: flex-end;
+}
+
 .context-menu {
   position: fixed;
   z-index: 1000;
