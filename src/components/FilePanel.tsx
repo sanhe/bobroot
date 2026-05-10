@@ -13,8 +13,17 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type {
+  CSSProperties,
+  Dispatch,
+  DragEvent,
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent,
+  RefObject,
+  SetStateAction,
+} from "react";
 import { basename, formatBytes, formatDate } from "../lib/format";
 import type { AppPlatform } from "../lib/platform";
 import type {
@@ -104,6 +113,17 @@ export function FilePanel({
   const selected = new Set(tab.selectedPaths);
   const highlightedPath = tab.selectedPaths[0] ?? null;
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [columnFractions, setColumnFractions] = useState<FileColumnFractions>({
+    name: 4,
+    size: 1.1,
+    modified: 1.8,
+  });
+  const gridTemplateColumns = useMemo(
+    () =>
+      `minmax(140px, ${columnFractions.name}fr) minmax(64px, ${columnFractions.size}fr) minmax(104px, ${columnFractions.modified}fr)`,
+    [columnFractions],
+  );
 
   useEffect(() => {
     if (!isActive || !highlightedPath) {
@@ -206,11 +226,40 @@ export function FilePanel({
         </label>
       </div>
 
-      <div className="file-table" role="table" aria-label={`${panelId} files`}>
+      <div
+        className="file-table"
+        ref={tableRef}
+        role="table"
+        aria-label={`${panelId} files`}
+        style={{ "--file-grid-columns": gridTemplateColumns } as FileTableStyle}
+      >
         <div className="file-row table-header" role="row">
-          <div>Name</div>
-          <div>Size</div>
-          <div>Modified</div>
+          <div className="table-header-cell">
+            Name
+            <ColumnResizeHandle
+              label="Resize name column"
+              onPointerDown={(event) =>
+                startColumnResize(event, tableRef, columnFractions, setColumnFractions, "name", "size")
+              }
+            />
+          </div>
+          <div className="table-header-cell">
+            Size
+            <ColumnResizeHandle
+              label="Resize size column"
+              onPointerDown={(event) =>
+                startColumnResize(
+                  event,
+                  tableRef,
+                  columnFractions,
+                  setColumnFractions,
+                  "size",
+                  "modified",
+                )
+              }
+            />
+          </div>
+          <div className="table-header-cell">Modified</div>
         </div>
         <div className="file-list">
           {loading ? <div className="empty-state">Loading...</div> : null}
@@ -260,6 +309,85 @@ export function FilePanel({
 
 function formatOptionLabel(option: FormatFilterOption): string {
   return `${option.label} (${option.count})`;
+}
+
+type FileColumnKey = "name" | "size" | "modified";
+
+type FileColumnFractions = Record<FileColumnKey, number>;
+
+type FileTableStyle = CSSProperties & {
+  "--file-grid-columns": string;
+};
+
+const MIN_COLUMN_WIDTHS: Record<FileColumnKey, number> = {
+  name: 140,
+  size: 64,
+  modified: 104,
+};
+
+function ColumnResizeHandle({
+  label,
+  onPointerDown,
+}: {
+  label: string;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="column-resize-handle"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={onPointerDown}
+      role="separator"
+      type="button"
+    />
+  );
+}
+
+function startColumnResize(
+  event: PointerEvent<HTMLButtonElement>,
+  tableRef: RefObject<HTMLDivElement | null>,
+  fractions: FileColumnFractions,
+  setFractions: Dispatch<SetStateAction<FileColumnFractions>>,
+  before: FileColumnKey,
+  after: FileColumnKey,
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const tableWidth = tableRef.current?.getBoundingClientRect().width ?? 0;
+  if (tableWidth <= 0) {
+    return;
+  }
+
+  const startX = event.clientX;
+  const startFractions = { ...fractions };
+  const fractionTotal = startFractions.name + startFractions.size + startFractions.modified;
+  const combined = startFractions[before] + startFractions[after];
+  const minBefore = (MIN_COLUMN_WIDTHS[before] / tableWidth) * fractionTotal;
+  const minAfter = (MIN_COLUMN_WIDTHS[after] / tableWidth) * fractionTotal;
+
+  const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
+    const deltaFraction = ((moveEvent.clientX - startX) / tableWidth) * fractionTotal;
+    const nextBefore = Math.min(
+      Math.max(startFractions[before] + deltaFraction, minBefore),
+      combined - minAfter,
+    );
+    const nextAfter = combined - nextBefore;
+    setFractions({
+      ...startFractions,
+      [before]: nextBefore,
+      [after]: nextAfter,
+    });
+  };
+
+  const onPointerUp = () => {
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+  };
+
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp, { once: true });
 }
 
 interface PathLabelProps {

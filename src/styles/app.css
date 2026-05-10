@@ -454,7 +454,7 @@ body.layout-dragging {
 
 .file-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 86px 148px;
+  grid-template-columns: var(--file-grid-columns, minmax(180px, 1fr) 86px 148px);
   align-items: center;
   width: 100%;
   min-height: 32px;
@@ -473,6 +473,48 @@ body.layout-dragging {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
+}
+
+.table-header-cell {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -7px;
+  z-index: 1;
+  width: 14px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.column-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.column-resize-handle:hover::after,
+.column-resize-handle:focus-visible::after {
+  background: #2f7dd1;
+}
+
+.column-resize-handle:focus-visible {
+  outline: 2px solid rgba(47, 125, 209, 0.32);
+  outline-offset: -2px;
 }
 
 .file-list {
