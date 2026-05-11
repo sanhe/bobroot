@@ -1045,12 +1045,6 @@ function App() {
 
   const startPathDrag = useCallback(
     (panelId: PanelId, entry: FileEntry, event: DragEvent<HTMLDivElement>) => {
-      const modifierHeld = platform === "macos" ? event.metaKey : event.ctrlKey;
-      if (!modifierHeld) {
-        event.preventDefault();
-        return;
-      }
-
       if (!session) {
         event.preventDefault();
         return;
@@ -1062,7 +1056,8 @@ function App() {
         : [];
       const dragPaths = selectedPaths.length > 0 ? selectedPaths : [entry.path];
       const terminalText = formatPathsForTerminal(dragPaths, platform);
-      const uriList = dragPaths.map(pathToFileUri).join("\r\n");
+      const dragUris = dragPaths.map(pathToFileUri);
+      const uriList = dragUris.join("\r\n");
 
       event.stopPropagation();
       event.dataTransfer.clearData();
@@ -1070,9 +1065,16 @@ function App() {
       event.dataTransfer.dropEffect = "copy";
       event.dataTransfer.setData("text/plain", terminalText);
       event.dataTransfer.setData("text/uri-list", uriList);
+      event.dataTransfer.setData("text/x-moz-url", dragUris.map((uri) => `${uri}\n${uri}`).join("\n"));
       event.dataTransfer.setData("application/x-bobroot-paths", JSON.stringify(dragPaths));
+      if (dragPaths.length === 1 && !entry.isDir) {
+        event.dataTransfer.setData(
+          "DownloadURL",
+          `${fileDragMimeType(entry)}:${entry.name}:${dragUris[0]}`,
+        );
+      }
 
-      recordAction("path_drag_started", { panelId, items: dragPaths });
+      recordAction("file_drag_started", { panelId, items: dragPaths });
       setContextMenu(null);
       setRenameState(null);
       setSession((previous) =>
@@ -1965,6 +1967,21 @@ function quoteWindowsPath(path: string): string {
   }
 
   return '"' + path.replace(/"/g, '""') + '"';
+}
+
+function fileDragMimeType(entry: FileEntry): string {
+  const mimeTypes: Record<string, string> = {
+    gif: "image/gif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    pdf: "application/pdf",
+    png: "image/png",
+    svg: "image/svg+xml",
+    txt: "text/plain",
+    webp: "image/webp",
+  };
+
+  return mimeTypes[entry.extension?.toLowerCase() ?? ""] ?? "application/octet-stream";
 }
 
 function pathToFileUri(path: string): string {
