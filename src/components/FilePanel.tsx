@@ -11,6 +11,7 @@ import {
   ListFilter,
   Plus,
   RefreshCw,
+  TableProperties,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +30,8 @@ import type { AppPlatform } from "../lib/platform";
 import type {
   DirectoryListing,
   FileEntry,
+  FilePropertyKey,
+  FilePropertyVisibility,
   FormatFilter,
   FormatFilterOption,
   PanelId,
@@ -44,6 +47,7 @@ interface FilePanelProps {
   listing: DirectoryListing | null;
   formatFilter: FormatFilter;
   formatOptions: FormatFilterOption[];
+  visibleProperties: FilePropertyVisibility;
   loading: boolean;
   isActive: boolean;
   platform: AppPlatform;
@@ -56,6 +60,7 @@ interface FilePanelProps {
   onGoParent: (panelId: PanelId) => void;
   onRefresh: (panelId: PanelId) => void;
   onFormatFilterChange: (panelId: PanelId, filter: FormatFilter) => void;
+  onFilePropertyVisibilityChange: (property: FilePropertyKey, visible: boolean) => void;
   onSelect: (panelId: PanelId, path: string, additive: boolean) => void;
   onOpenEntry: (panelId: PanelId, entry: FileEntry) => void;
   onEntryDragStart: (
@@ -84,6 +89,7 @@ export function FilePanel({
   listing,
   formatFilter,
   formatOptions,
+  visibleProperties,
   loading,
   isActive,
   platform,
@@ -96,6 +102,7 @@ export function FilePanel({
   onGoParent,
   onRefresh,
   onFormatFilterChange,
+  onFilePropertyVisibilityChange,
   onSelect,
   onOpenEntry,
   onEntryDragStart,
@@ -114,16 +121,59 @@ export function FilePanel({
   const highlightedPath = tab.selectedPaths[0] ?? null;
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const tableRef = useRef<HTMLDivElement>(null);
+  const propertyMenuRef = useRef<HTMLDivElement>(null);
+  const [propertyMenuOpen, setPropertyMenuOpen] = useState(false);
   const [columnFractions, setColumnFractions] = useState<FileColumnFractions>({
     name: 4,
     size: 1.1,
     modified: 1.8,
+    kind: 0.9,
   });
+  const visibleColumns = useMemo<FileColumnKey[]>(
+    () => [
+      "name",
+      ...FILE_PROPERTY_OPTIONS.filter((option) => visibleProperties[option.key]).map(
+        (option) => option.key,
+      ),
+    ],
+    [visibleProperties],
+  );
   const gridTemplateColumns = useMemo(
     () =>
-      `minmax(0, ${columnFractions.name}fr) minmax(64px, ${columnFractions.size}fr) minmax(104px, ${columnFractions.modified}fr)`,
-    [columnFractions],
+      visibleColumns
+        .map(
+          (column) =>
+            `minmax(${GRID_COLUMN_MIN_WIDTHS[column]}px, ${columnFractions[column]}fr)`,
+        )
+        .join(" "),
+    [columnFractions, visibleColumns],
   );
+
+  useEffect(() => {
+    if (!propertyMenuOpen) {
+      return;
+    }
+
+    const closeOnOutsidePointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && propertyMenuRef.current?.contains(target)) {
+        return;
+      }
+      setPropertyMenuOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPropertyMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", closeOnOutsidePointerDown, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnOutsidePointerDown, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [propertyMenuOpen]);
 
   useEffect(() => {
     if (!isActive || !highlightedPath) {
@@ -209,6 +259,45 @@ export function FilePanel({
           platform={platform}
           onNavigate={(path) => onNavigateToPath(panelId, path)}
         />
+        <div className="property-menu" ref={propertyMenuRef}>
+          <IconButton
+            aria-expanded={propertyMenuOpen}
+            aria-haspopup="menu"
+            className={propertyMenuOpen ? "pressed" : ""}
+            label="File properties"
+            onClick={(event) => {
+              event.stopPropagation();
+              setPropertyMenuOpen((open) => !open);
+            }}
+          >
+            <TableProperties size={16} />
+          </IconButton>
+          {propertyMenuOpen ? (
+            <div
+              className="property-menu-popover"
+              onClick={(event) => event.stopPropagation()}
+              role="menu"
+            >
+              {FILE_PROPERTY_OPTIONS.map((option) => (
+                <label
+                  aria-checked={visibleProperties[option.key]}
+                  className="property-menu-option"
+                  key={option.key}
+                  role="menuitemcheckbox"
+                >
+                  <input
+                    checked={visibleProperties[option.key]}
+                    onChange={(event) =>
+                      onFilePropertyVisibilityChange(option.key, event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          ) : null}
+        </div>
         <label className="format-filter" title="Filter visible file format">
           <ListFilter size={14} />
           <select
@@ -235,32 +324,27 @@ export function FilePanel({
         style={{ "--file-grid-columns": gridTemplateColumns } as FileTableStyle}
       >
         <div className="file-row table-header" role="row">
-          <div className="table-header-cell">
-            Name
-            <ColumnResizeHandle
-              label="Resize name column"
-              onPointerDown={(event) =>
-                startColumnResize(event, tableRef, columnFractions, setColumnFractions, "name", "size")
-              }
-            />
-          </div>
-          <div className="table-header-cell">
-            Size
-            <ColumnResizeHandle
-              label="Resize size column"
-              onPointerDown={(event) =>
-                startColumnResize(
-                  event,
-                  tableRef,
-                  columnFractions,
-                  setColumnFractions,
-                  "size",
-                  "modified",
-                )
-              }
-            />
-          </div>
-          <div className="table-header-cell">Modified</div>
+          {visibleColumns.map((column, index) => (
+            <div className="table-header-cell" key={column}>
+              {columnLabel(column)}
+              {index < visibleColumns.length - 1 ? (
+                <ColumnResizeHandle
+                  label={`Resize ${columnLabel(column).toLowerCase()} column`}
+                  onPointerDown={(event) =>
+                    startColumnResize(
+                      event,
+                      tableRef,
+                      columnFractions,
+                      setColumnFractions,
+                      visibleColumns,
+                      column,
+                      visibleColumns[index + 1],
+                    )
+                  }
+                />
+              ) : null}
+            </div>
+          ))}
         </div>
         <div className="file-list">
           {loading ? <div className="empty-state">Loading...</div> : null}
@@ -299,6 +383,7 @@ export function FilePanel({
                   onRenameChange={onRenameChange}
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
+                  visibleProperties={visibleProperties}
                 />
               ))
             : null}
@@ -312,7 +397,7 @@ function formatOptionLabel(option: FormatFilterOption): string {
   return `${option.label} (${option.count})`;
 }
 
-type FileColumnKey = "name" | "size" | "modified";
+type FileColumnKey = "name" | FilePropertyKey;
 
 type FileColumnFractions = Record<FileColumnKey, number>;
 
@@ -324,7 +409,29 @@ const MIN_COLUMN_WIDTHS: Record<FileColumnKey, number> = {
   name: 140,
   size: 64,
   modified: 104,
+  kind: 86,
 };
+
+const GRID_COLUMN_MIN_WIDTHS: Record<FileColumnKey, number> = {
+  name: 0,
+  size: 64,
+  modified: 104,
+  kind: 86,
+};
+
+const FILE_PROPERTY_OPTIONS: Array<{ key: FilePropertyKey; label: string }> = [
+  { key: "size", label: "Size" },
+  { key: "modified", label: "Modified" },
+  { key: "kind", label: "Kind" },
+];
+
+function columnLabel(column: FileColumnKey): string {
+  if (column === "name") {
+    return "Name";
+  }
+
+  return FILE_PROPERTY_OPTIONS.find((option) => option.key === column)?.label ?? column;
+}
 
 function ColumnResizeHandle({
   label,
@@ -350,6 +457,7 @@ function startColumnResize(
   tableRef: RefObject<HTMLDivElement | null>,
   fractions: FileColumnFractions,
   setFractions: Dispatch<SetStateAction<FileColumnFractions>>,
+  activeColumns: FileColumnKey[],
   before: FileColumnKey,
   after: FileColumnKey,
 ) {
@@ -363,7 +471,10 @@ function startColumnResize(
 
   const startX = event.clientX;
   const startFractions = { ...fractions };
-  const fractionTotal = startFractions.name + startFractions.size + startFractions.modified;
+  const fractionTotal = activeColumns.reduce(
+    (total, column) => total + startFractions[column],
+    0,
+  );
   const combined = startFractions[before] + startFractions[after];
   const minBefore = (MIN_COLUMN_WIDTHS[before] / tableWidth) * fractionTotal;
   const minAfter = (MIN_COLUMN_WIDTHS[after] / tableWidth) * fractionTotal;
@@ -539,6 +650,7 @@ interface FileRowProps {
   onRenameChange: (name: string) => void;
   onRenameCommit: () => void;
   onRenameCancel: () => void;
+  visibleProperties: FilePropertyVisibility;
 }
 
 function FileRow({
@@ -554,6 +666,7 @@ function FileRow({
   onRenameChange,
   onRenameCommit,
   onRenameCancel,
+  visibleProperties,
 }: FileRowProps) {
   const renameInputRef = useRef<HTMLInputElement>(null);
   const icon = entry.isDir ? (
@@ -621,8 +734,29 @@ function FileRow({
           </span>
         )}
       </div>
-      <div className="file-size">{entry.isDir ? "--" : formatBytes(entry.size)}</div>
-      <div className="file-modified">{formatDate(entry.modified)}</div>
+      {visibleProperties.size ? (
+        <div className="file-size">{entry.isDir ? "--" : formatBytes(entry.size)}</div>
+      ) : null}
+      {visibleProperties.modified ? (
+        <div className="file-modified">{formatDate(entry.modified)}</div>
+      ) : null}
+      {visibleProperties.kind ? <div className="file-kind">{formatKind(entry)}</div> : null}
     </div>
   );
+}
+
+function formatKind(entry: FileEntry): string {
+  if (entry.isSymlink) {
+    return "Symlink";
+  }
+  if (entry.isDir) {
+    return "Folder";
+  }
+  if (entry.extension) {
+    return entry.extension.toUpperCase();
+  }
+  if (entry.isFile) {
+    return "File";
+  }
+  return "Item";
 }

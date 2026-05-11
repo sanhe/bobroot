@@ -1,5 +1,6 @@
 import { buildLayoutFromLegacy, normalizeLayout } from "./layout";
 import type {
+  FilePropertyVisibility,
   LayoutNode,
   PanelId,
   PanelRef,
@@ -7,6 +8,7 @@ import type {
   SessionData,
   TabState,
 } from "./types";
+import { DEFAULT_FILE_PROPERTY_VISIBILITY } from "./types";
 
 let nextId = 1;
 
@@ -79,7 +81,17 @@ export function normalizeSession(
     showHiddenFiles: Boolean(session.showHiddenFiles),
     layout,
     visibility,
+    filePropertyVisibility: normalizeFilePropertyVisibility(session.filePropertyVisibility),
     window: session.window ?? null,
+  };
+}
+
+function normalizeFilePropertyVisibility(
+  visibility: Partial<FilePropertyVisibility> | undefined,
+): FilePropertyVisibility {
+  return {
+    ...DEFAULT_FILE_PROPERTY_VISIBILITY,
+    ...visibility,
   };
 }
 

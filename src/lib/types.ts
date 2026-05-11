@@ -25,6 +25,16 @@ export interface FormatFilterOption {
   count: number;
 }
 
+export type FilePropertyKey = "size" | "modified" | "kind";
+
+export type FilePropertyVisibility = Record<FilePropertyKey, boolean>;
+
+export const DEFAULT_FILE_PROPERTY_VISIBILITY: FilePropertyVisibility = {
+  size: true,
+  modified: true,
+  kind: false,
+};
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -91,6 +101,7 @@ export interface SessionData {
   showHiddenFiles: boolean;
   layout: LayoutNode;
   visibility: Record<PanelRef, boolean>;
+  filePropertyVisibility: FilePropertyVisibility;
   window: WindowSession | null;
 }
 

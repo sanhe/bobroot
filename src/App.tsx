@@ -63,6 +63,7 @@ import type {
   ConflictStrategy,
   DirectoryListing,
   FileEntry,
+  FilePropertyKey,
   FormatFilter,
   FormatFilterOption,
   LayoutNode,
@@ -72,6 +73,7 @@ import type {
   SessionData,
   TabState,
 } from "./lib/types";
+import { DEFAULT_FILE_PROPERTY_VISIBILITY } from "./lib/types";
 import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { ConfirmationDialog } from "./components/ConfirmationDialog";
@@ -155,6 +157,8 @@ function App() {
   const terminalVisible = session?.visibility.terminal ?? false;
   const agentVisible = session?.visibility.agent ?? false;
   const showHiddenFiles = session?.showHiddenFiles ?? false;
+  const filePropertyVisibility =
+    session?.filePropertyVisibility ?? DEFAULT_FILE_PROPERTY_VISIBILITY;
 
   const reportNotice = useCallback((message: string | null) => {
     setNotice(message);
@@ -364,6 +368,7 @@ function App() {
               showHiddenFiles: false,
               layout: defaultLayout(),
               visibility: { left: true, right: true, terminal: false, agent: false },
+              filePropertyVisibility: { ...DEFAULT_FILE_PROPERTY_VISIBILITY },
               window: null,
             };
 
@@ -1427,6 +1432,26 @@ function App() {
     [listings, recordAction, session],
   );
 
+  const changeFilePropertyVisibility = useCallback(
+    (property: FilePropertyKey, visible: boolean) => {
+      recordAction("change_file_property_visibility", { property, visible });
+      setContextMenu(null);
+      setRenameState(null);
+      setSession((previous) =>
+        previous
+          ? {
+              ...previous,
+              filePropertyVisibility: {
+                ...previous.filePropertyVisibility,
+                [property]: visible,
+              },
+            }
+          : previous,
+      );
+    },
+    [recordAction],
+  );
+
   const shortcutHandlers = useMemo(
     () => ({
       openSelected,
@@ -1553,11 +1578,13 @@ function App() {
         panel={panelState}
         panelId={panelId}
         platform={platform}
+        visibleProperties={filePropertyVisibility}
         onActivate={setActivePanel}
         onCloseTab={closeTab}
         onCreateFolder={createFolderInPanel}
         onEntryContextMenu={openEntryContextMenu}
         onEntryDragStart={startPathDrag}
+        onFilePropertyVisibilityChange={changeFilePropertyVisibility}
         onFormatFilterChange={changeFormatFilter}
         onGoBack={goBack}
         onGoForward={goForward}
