@@ -121,7 +121,7 @@ export function FilePanel({
   });
   const gridTemplateColumns = useMemo(
     () =>
-      `minmax(140px, ${columnFractions.name}fr) minmax(64px, ${columnFractions.size}fr) minmax(104px, ${columnFractions.modified}fr)`,
+      `minmax(0, ${columnFractions.name}fr) minmax(64px, ${columnFractions.size}fr) minmax(104px, ${columnFractions.modified}fr)`,
     [columnFractions],
   );
 
@@ -157,6 +157,7 @@ export function FilePanel({
             key={panelTab.id}
             onClick={() => onSwitchTab(panelId, panelTab.id)}
             role="tab"
+            title={panelTab.path}
             type="button"
           >
             <HardDrive size={14} />
@@ -615,7 +616,9 @@ function FileRow({
             value={renamingName}
           />
         ) : (
-          <span className="name-text">{entry.name}</span>
+          <span className="name-text" title={entry.name}>
+            {entry.name}
+          </span>
         )}
       </div>
       <div className="file-size">{entry.isDir ? "--" : formatBytes(entry.size)}</div>
