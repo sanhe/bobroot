@@ -8,7 +8,7 @@ import {
   updateSplitSizes,
   type DropEdge,
 } from "../lib/layout";
-import type { LayoutNode, PanelRef } from "../lib/types";
+import type { LayoutChangeDetails, LayoutNode, PanelRef } from "../lib/types";
 
 const MIN_LEAF_FRACTION = 0.08;
 
@@ -20,7 +20,7 @@ export interface LayoutDragHandlers {
 interface LayoutProps {
   layout: LayoutNode;
   visibility: Record<PanelRef, boolean>;
-  onLayoutChange: (next: LayoutNode) => void;
+  onLayoutChange: (next: LayoutNode, details?: LayoutChangeDetails) => void;
   renderPanel: (ref: PanelRef, dragHandlers: LayoutDragHandlers) => ReactNode;
 }
 
@@ -88,7 +88,12 @@ export function Layout({
     const onPointerUp = () => {
       const target = dropTargetRef.current;
       if (target) {
-        onLayoutChange(moveLeaf(layout, dragRef, target.ref, target.edge));
+        onLayoutChange(moveLeaf(layout, dragRef, target.ref, target.edge), {
+          reason: "drag",
+          sourceRef: dragRef,
+          targetRef: target.ref,
+          edge: target.edge,
+        });
       }
       setDragRef(null);
       setDropTarget(null);
@@ -105,8 +110,8 @@ export function Layout({
   }, [dragRef, layout, onLayoutChange]);
 
   const onSplitResize = useCallback(
-    (splitId: string, sizes: number[]) => {
-      onLayoutChange(updateSplitSizes(layout, splitId, sizes));
+    (splitId: string, sizes: number[], details: LayoutChangeDetails) => {
+      onLayoutChange(updateSplitSizes(layout, splitId, sizes), details);
     },
     [layout, onLayoutChange],
   );
@@ -130,7 +135,11 @@ interface LayoutNodeViewProps {
   dragRef: PanelRef | null;
   dropTarget: { ref: PanelRef; edge: DropEdge } | null;
   onStartDrag: (ref: PanelRef) => void;
-  onSplitResize: (splitId: string, sizes: number[]) => void;
+  onSplitResize: (
+    splitId: string,
+    sizes: number[],
+    details: LayoutChangeDetails,
+  ) => void;
   renderPanel: (ref: PanelRef, dragHandlers: LayoutDragHandlers) => ReactNode;
 }
 
@@ -253,7 +262,7 @@ function SplitView({
     const startBeforeFraction = sizes[beforeIndex] / sumOriginal;
     const startBeforePx = startBeforeFraction * totalSize;
     const handleStartCoord = isRow ? event.clientX : event.clientY;
-    const containerStart = isRow ? bounds.left : bounds.top;
+    let latestSizes: number[] | null = null;
 
     document.body.classList.add("layout-resizing");
 
@@ -271,10 +280,21 @@ function SplitView({
       const newSizes = [...sizes];
       newSizes[beforeIndex] = nextBeforeFraction;
       newSizes[afterIndex] = nextAfterFraction;
-      onSplitResize(splitId, newSizes);
+      latestSizes = newSizes;
+      onSplitResize(splitId, newSizes, { reason: "resize", log: false });
     };
 
     const onUp = () => {
+      if (latestSizes) {
+        onSplitResize(splitId, latestSizes, {
+          reason: "resize",
+          splitId,
+          direction: split.direction,
+          beforeIndex,
+          afterIndex,
+          sizes: latestSizes.map(roundLayoutSize),
+        });
+      }
       document.body.classList.remove("layout-resizing");
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -370,4 +390,8 @@ function isAnyDescendantVisible(
 function sumSizes(sizes: number[]): number {
   const sum = sizes.reduce((total, value) => total + value, 0);
   return sum > 0 ? sum : sizes.length;
+}
+
+function roundLayoutSize(size: number): number {
+  return Math.round(size * 1000) / 1000;
 }

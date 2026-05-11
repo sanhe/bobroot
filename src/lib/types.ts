@@ -17,6 +17,11 @@ export type ConflictStrategy = "replace" | "skip" | "rename";
 
 export type ActionLogDetails = Record<string, unknown>;
 
+export interface LayoutChangeDetails extends ActionLogDetails {
+  reason: "drag" | "resize" | "programmatic";
+  log?: boolean;
+}
+
 export type FormatFilter = "all" | "folders" | "noExtension" | `extension:${string}`;
 
 export interface FormatFilterOption {

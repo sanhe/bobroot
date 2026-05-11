@@ -1619,6 +1619,47 @@ body.terminal-resizing * {
   font-size: 11px;
 }
 
+.audio-preview-dialog {
+  width: min(520px, 100%);
+  padding: 12px;
+  border: 1px solid #cdd3dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 22px 48px rgba(23, 31, 42, 0.2);
+  display: grid;
+  gap: 12px;
+}
+
+.audio-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.audio-preview-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #1d1d1f;
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audio-preview-player {
+  display: block;
+  width: 100%;
+}
+
+.audio-preview-error {
+  margin: -4px 0 0;
+  color: #9a3412;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 @media (max-width: 1050px) {
   .global-actions .icon-button.with-label {
     min-width: 34px;

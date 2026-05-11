@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
+import { flushSync } from "react-dom";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -16,6 +18,7 @@ import {
   Terminal as TerminalIcon,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import {
   copyItems,
@@ -66,6 +69,7 @@ import type {
   FilePropertyKey,
   FormatFilter,
   FormatFilterOption,
+  LayoutChangeDetails,
   LayoutNode,
   PanelId,
   PanelRef,
@@ -111,6 +115,12 @@ interface ConflictStrategyRequest {
   mode: "copy" | "move";
 }
 
+interface AudioPreviewState {
+  name: string;
+  path: string;
+  src: string;
+}
+
 interface DirectoryChangedPayload {
   path: string;
 }
@@ -128,6 +138,7 @@ function App() {
   const [renameState, setRenameState] = useState<RenameState | null>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
   const [conflictRequest, setConflictRequest] = useState<ConflictStrategyRequest | null>(null);
+  const [audioPreview, setAudioPreview] = useState<AudioPreviewState | null>(null);
   const [pathPrompt, setPathPrompt] = useState<{
     initialValue: string;
     panelId: PanelId;
@@ -671,8 +682,11 @@ function App() {
   }, [recordAction]);
 
   const setLayout = useCallback(
-    (next: LayoutNode) => {
-      recordAction("update_layout");
+    (next: LayoutNode, details?: LayoutChangeDetails) => {
+      const { log = true, ...logDetails } = details ?? { reason: "programmatic" };
+      if (log) {
+        recordAction("update_layout", logDetails);
+      }
       setSession((previous) =>
         previous ? { ...previous, layout: next } : previous,
       );
@@ -1362,6 +1376,21 @@ function App() {
       return;
     }
 
+    if (isAudioPreviewEntry(entry)) {
+      setContextMenu(null);
+      setRenameState(null);
+      flushSync(() => {
+        setAudioPreview({
+          name: entry.name,
+          path: entry.path,
+          src: convertFileSrc(entry.path),
+        });
+      });
+      recordAction("audio_preview_opened", { path: entry.path });
+      reportNotice(null);
+      return;
+    }
+
     try {
       await previewPath(entry.path);
       recordAction("preview_opened", { path: entry.path });
@@ -1511,6 +1540,7 @@ function App() {
     shortcutHandlers,
     confirmation === null &&
       conflictRequest === null &&
+      audioPreview === null &&
       pathPrompt === null,
   );
 
@@ -1767,6 +1797,9 @@ function App() {
           onNavigate={navigateFromPathPrompt}
         />
       ) : null}
+      {audioPreview ? (
+        <AudioPreviewDialog preview={audioPreview} onClose={() => setAudioPreview(null)} />
+      ) : null}
       {conflictRequest ? (
         <ConfirmationDialog
           actions={[
@@ -1798,6 +1831,85 @@ function App() {
         />
       ) : null}
     </main>
+  );
+}
+
+function AudioPreviewDialog({
+  preview,
+  onClose,
+}: {
+  preview: AudioPreviewState;
+  onClose: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return undefined;
+    }
+
+    setPlaybackError(null);
+    void audio.play().catch(() => {
+      setPlaybackError("Press play to start the preview.");
+    });
+
+    return () => {
+      audio.pause();
+    };
+  }, [preview.src]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="confirmation-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+      role="presentation"
+    >
+      <section
+        aria-label={`Preview ${preview.name}`}
+        aria-modal="true"
+        className="audio-preview-dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="audio-preview-header">
+          <div className="audio-preview-title" title={preview.path}>
+            {preview.name}
+          </div>
+          <IconButton label="Close audio preview" onClick={onClose}>
+            <X size={16} />
+          </IconButton>
+        </div>
+        <audio
+          autoPlay
+          className="audio-preview-player"
+          controls
+          onError={() => setPlaybackError("Bobroot could not load this audio file.")}
+          preload="auto"
+          ref={audioRef}
+          src={preview.src}
+        />
+        {playbackError ? <p className="audio-preview-error">{playbackError}</p> : null}
+      </section>
+    </div>
   );
 }
 
@@ -1876,6 +1988,28 @@ function entryMatchesFormatFilter(entry: FileEntry, filter: FormatFilter): boole
   }
 
   return !entry.isDir && entry.extension === filter.slice("extension:".length);
+}
+
+const AUDIO_PREVIEW_EXTENSIONS = new Set([
+  "aac",
+  "aif",
+  "aiff",
+  "flac",
+  "m4a",
+  "mp3",
+  "oga",
+  "ogg",
+  "opus",
+  "wav",
+  "wave",
+]);
+
+function isAudioPreviewEntry(entry: FileEntry): boolean {
+  return (
+    entry.isFile &&
+    entry.extension !== null &&
+    AUDIO_PREVIEW_EXTENSIONS.has(entry.extension.toLowerCase())
+  );
 }
 
 function buildFormatFilterOptions(
