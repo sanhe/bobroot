@@ -40,6 +40,18 @@ export const DEFAULT_FILE_PROPERTY_VISIBILITY: FilePropertyVisibility = {
   kind: false,
 };
 
+export type TerminalTheme = "dark" | "light";
+
+export interface TerminalAppearance {
+  theme: TerminalTheme;
+  fontSize: number;
+}
+
+export const DEFAULT_TERMINAL_APPEARANCE: TerminalAppearance = {
+  theme: "dark",
+  fontSize: 12,
+};
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -107,6 +119,7 @@ export interface SessionData {
   layout: LayoutNode;
   visibility: Record<PanelRef, boolean>;
   filePropertyVisibility: FilePropertyVisibility;
+  terminalAppearance: TerminalAppearance;
   window: WindowSession | null;
 }
 

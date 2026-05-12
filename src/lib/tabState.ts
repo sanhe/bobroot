@@ -7,8 +7,13 @@ import type {
   PanelState,
   SessionData,
   TabState,
+  TerminalAppearance,
+  TerminalTheme,
 } from "./types";
-import { DEFAULT_FILE_PROPERTY_VISIBILITY } from "./types";
+import {
+  DEFAULT_FILE_PROPERTY_VISIBILITY,
+  DEFAULT_TERMINAL_APPEARANCE,
+} from "./types";
 
 let nextId = 1;
 
@@ -82,6 +87,7 @@ export function normalizeSession(
     layout,
     visibility,
     filePropertyVisibility: normalizeFilePropertyVisibility(session.filePropertyVisibility),
+    terminalAppearance: normalizeTerminalAppearance(session.terminalAppearance),
     window: session.window ?? null,
   };
 }
@@ -92,6 +98,24 @@ function normalizeFilePropertyVisibility(
   return {
     ...DEFAULT_FILE_PROPERTY_VISIBILITY,
     ...visibility,
+  };
+}
+
+function normalizeTerminalAppearance(
+  appearance: Partial<TerminalAppearance> | undefined,
+): TerminalAppearance {
+  const theme: TerminalTheme =
+    appearance?.theme === "light" || appearance?.theme === "dark"
+      ? appearance.theme
+      : DEFAULT_TERMINAL_APPEARANCE.theme;
+  const fontSize =
+    typeof appearance?.fontSize === "number"
+      ? clamp(Math.round(appearance.fontSize), 10, 22)
+      : DEFAULT_TERMINAL_APPEARANCE.fontSize;
+
+  return {
+    theme,
+    fontSize,
   };
 }
 
@@ -116,6 +140,10 @@ function resolveLayoutAndVisibility(session: {
 
   const built = buildLayoutFromLegacy(session);
   return { layout: normalizeLayout(built.layout), visibility: built.visibility };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 export function navigateTab(tab: TabState, path: string): TabState {

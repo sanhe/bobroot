@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   FolderSync,
   GripVertical,
+  Palette,
   Plus,
   Terminal as TerminalIcon,
   Trash2,
@@ -19,6 +20,7 @@ import {
   writeTerminalData,
 } from "../lib/api";
 import { basename, displayPath } from "../lib/format";
+import type { TerminalAppearance, TerminalTheme } from "../lib/types";
 import { IconButton } from "./IconButton";
 import type { LayoutDragHandlers } from "./Layout";
 
@@ -27,7 +29,9 @@ export type TerminalCloseScope = "panel" | "tab";
 interface TerminalPanelProps {
   cwd: string;
   activeDirectory: string;
+  appearance: TerminalAppearance;
   onCwdChange: (cwd: string) => void;
+  onAppearanceChange: (appearance: TerminalAppearance) => void;
   onClose: () => void;
   onBeforeClose: (scope: TerminalCloseScope, runningCount: number) => Promise<boolean>;
   onLiveSessionCountChange: (count: number) => void;
@@ -59,7 +63,9 @@ let nextTerminalTabId = 1;
 export function TerminalPanel({
   cwd,
   activeDirectory,
+  appearance,
   onCwdChange,
+  onAppearanceChange,
   onClose,
   onBeforeClose,
   onLiveSessionCountChange,
@@ -185,7 +191,10 @@ export function TerminalPanel({
   const activeStatusLabel = activeTab?.status === "running" ? null : activeTab?.status;
 
   return (
-    <section className="terminal-panel" aria-label="Terminal">
+    <section
+      className={`terminal-panel terminal-theme-${appearance.theme}`}
+      aria-label="Terminal"
+    >
       <div className="terminal-header">
         <button
           aria-label="Move panel"
@@ -237,6 +246,38 @@ export function TerminalPanel({
           {activeStatusLabel ? ` (${activeStatusLabel})` : ""}
         </div>
         <div className="terminal-actions">
+          <label className="terminal-appearance-control" title="Terminal theme">
+            <Palette size={14} />
+            <select
+              aria-label="Terminal theme"
+              onChange={(event) =>
+                onAppearanceChange({
+                  ...appearance,
+                  theme: event.target.value as TerminalTheme,
+                })
+              }
+              value={appearance.theme}
+            >
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label className="terminal-font-size-control" title="Terminal font size">
+            <input
+              aria-label="Terminal font size"
+              max={22}
+              min={10}
+              onChange={(event) =>
+                onAppearanceChange({
+                  ...appearance,
+                  fontSize: clamp(Number(event.target.value), 10, 22),
+                })
+              }
+              step={1}
+              type="number"
+              value={appearance.fontSize}
+            />
+          </label>
           <IconButton
             label={`Use active folder: ${displayPath(activeDirectory)}`}
             onClick={restartInActiveDirectory}
@@ -256,6 +297,7 @@ export function TerminalPanel({
         {tabs.map((tab) => (
           <TerminalTabView
             active={tab.id === activeTabId}
+            appearance={appearance}
             clearToken={tab.id === activeTabId ? clearToken : 0}
             cwd={tab.cwd}
             key={tab.id}
@@ -272,6 +314,7 @@ export function TerminalPanel({
 
 interface TerminalTabViewProps {
   active: boolean;
+  appearance: TerminalAppearance;
   clearToken: number;
   cwd: string;
   restartToken: number;
@@ -280,6 +323,7 @@ interface TerminalTabViewProps {
 
 function TerminalTabView({
   active,
+  appearance,
   clearToken,
   cwd,
   restartToken,
@@ -309,15 +353,10 @@ function TerminalTabView({
       disableStdin: true,
       fontFamily:
         'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-      fontSize: 12,
+      fontSize: appearance.fontSize,
       macOptionIsMeta: true,
       scrollback: 5000,
-      theme: {
-        background: "#0f1720",
-        cursor: "#edf5ff",
-        foreground: "#d8e0ea",
-        selectionBackground: "#2f7dd166",
-      },
+      theme: terminalTheme(appearance.theme),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -402,6 +441,18 @@ function TerminalTabView({
       return;
     }
 
+    terminal.options.fontSize = appearance.fontSize;
+    terminal.options.theme = terminalTheme(appearance.theme);
+    fitAddon.fit();
+  }, [appearance.fontSize, appearance.theme]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) {
+      return;
+    }
+
     let cancelled = false;
     const previousSessionId = sessionIdRef.current;
     sessionIdRef.current = null;
@@ -478,6 +529,32 @@ function createTerminalTab(cwd: string): TerminalTab {
 
 function isLiveTerminalStatus(status: TerminalStatus) {
   return status === "starting" || status === "running";
+}
+
+function terminalTheme(theme: TerminalTheme) {
+  if (theme === "light") {
+    return {
+      background: "#ffffff",
+      cursor: "#1f2937",
+      foreground: "#1f2937",
+      selectionBackground: "#9bb7dc66",
+    };
+  }
+
+  return {
+    background: "#0f1720",
+    cursor: "#edf5ff",
+    foreground: "#d8e0ea",
+    selectionBackground: "#2f7dd166",
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.min(Math.max(Math.round(value), min), max);
 }
 
 function errorToMessage(error: unknown): string {

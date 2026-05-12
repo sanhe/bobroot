@@ -76,8 +76,12 @@ import type {
   PanelState,
   SessionData,
   TabState,
+  TerminalAppearance,
 } from "./lib/types";
-import { DEFAULT_FILE_PROPERTY_VISIBILITY } from "./lib/types";
+import {
+  DEFAULT_FILE_PROPERTY_VISIBILITY,
+  DEFAULT_TERMINAL_APPEARANCE,
+} from "./lib/types";
 import { readWindowSession, restoreWindowSession } from "./lib/windowSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { ConfirmationDialog } from "./components/ConfirmationDialog";
@@ -170,6 +174,8 @@ function App() {
   const showHiddenFiles = session?.showHiddenFiles ?? false;
   const filePropertyVisibility =
     session?.filePropertyVisibility ?? DEFAULT_FILE_PROPERTY_VISIBILITY;
+  const terminalAppearance =
+    session?.terminalAppearance ?? DEFAULT_TERMINAL_APPEARANCE;
 
   const reportNotice = useCallback((message: string | null) => {
     setNotice(message);
@@ -380,6 +386,7 @@ function App() {
               layout: defaultLayout(),
               visibility: { left: true, right: true, terminal: false, agent: false },
               filePropertyVisibility: { ...DEFAULT_FILE_PROPERTY_VISIBILITY },
+              terminalAppearance: { ...DEFAULT_TERMINAL_APPEARANCE },
               window: null,
             };
 
@@ -1481,6 +1488,24 @@ function App() {
     [recordAction],
   );
 
+  const changeTerminalAppearance = useCallback(
+    (appearance: TerminalAppearance) => {
+      recordAction("change_terminal_appearance", {
+        theme: appearance.theme,
+        fontSize: appearance.fontSize,
+      });
+      setSession((previous) =>
+        previous
+          ? {
+              ...previous,
+              terminalAppearance: appearance,
+            }
+          : previous,
+      );
+    },
+    [recordAction],
+  );
+
   const shortcutHandlers = useMemo(
     () => ({
       openSelected,
@@ -1570,8 +1595,10 @@ function App() {
       return (
         <TerminalPanel
           activeDirectory={activeDirectory}
+          appearance={terminalAppearance}
           cwd={currentTerminalCwd}
           dragHandlers={dragHandlers}
+          onAppearanceChange={changeTerminalAppearance}
           onBeforeClose={confirmTerminalClose}
           onClose={closeTerminal}
           onCwdChange={setTerminalCwd}

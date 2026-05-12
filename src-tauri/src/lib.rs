@@ -110,6 +110,8 @@ struct SessionData {
     #[serde(skip_serializing_if = "Option::is_none")]
     file_property_visibility: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_appearance: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     right_panel_visible: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     panel_split: Option<f64>,
