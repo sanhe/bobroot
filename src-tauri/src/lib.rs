@@ -112,6 +112,8 @@ struct SessionData {
     #[serde(skip_serializing_if = "Option::is_none")]
     terminal_appearance: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    audio_playback: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     right_panel_visible: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     panel_split: Option<f64>,
@@ -562,6 +564,33 @@ fn open_path(path: String) -> CommandResult<()> {
             format!("Could not open '{}': {}", path.display(), error),
         )
     })
+}
+
+#[tauri::command]
+fn open_path_with_player(path: String, player: String) -> CommandResult<()> {
+    let path = normalize_input_path(&path)?;
+    if !path_exists(&path)? {
+        return Err(CommandError::new(
+            "not_found",
+            format!("'{}' does not exist", path.display()),
+        ));
+    }
+
+    let player = player.trim();
+    if player.is_empty() {
+        return Err(CommandError::new(
+            "invalid_player",
+            "Choose an audio player before opening this file",
+        ));
+    }
+    if player.contains('\0') {
+        return Err(CommandError::new(
+            "invalid_player",
+            "Audio player cannot contain null bytes",
+        ));
+    }
+
+    open_path_with_player_platform(&path, player)
 }
 
 #[tauri::command]
@@ -1484,6 +1513,54 @@ fn preview_platform_path(path: &Path) -> CommandResult<()> {
 }
 
 #[cfg(target_os = "macos")]
+fn open_path_with_player_platform(path: &Path, player: &str) -> CommandResult<()> {
+    if should_open_macos_application(player) {
+        let mut command = Command::new("open");
+        command.arg("-a").arg(player);
+        return spawn_player_command(command, path, player);
+    }
+
+    spawn_player_command(Command::new(player), path, player)
+}
+
+#[cfg(target_os = "macos")]
+fn should_open_macos_application(player: &str) -> bool {
+    let extension_is_app = Path::new(player)
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(|extension| extension.eq_ignore_ascii_case("app"))
+        .unwrap_or(false);
+
+    extension_is_app || (!player.contains('/') && !player.contains('\\'))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_path_with_player_platform(path: &Path, player: &str) -> CommandResult<()> {
+    spawn_player_command(Command::new(player), path, player)
+}
+
+fn spawn_player_command(mut command: Command, path: &Path, player: &str) -> CommandResult<()> {
+    command
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            CommandError::new(
+                "open_failed",
+                format!(
+                    "Could not open '{}' with '{}': {}",
+                    path.display(),
+                    player,
+                    error
+                ),
+            )
+        })
+}
+
+#[cfg(target_os = "macos")]
 fn reveal_platform_path(path: &Path) -> CommandResult<()> {
     let status = Command::new("open").arg("-R").arg(path).status()?;
     if status.success() {
@@ -1815,6 +1892,7 @@ pub fn run() {
             move_to_trash,
             permanently_delete,
             open_path,
+            open_path_with_player,
             open_external_url,
             preview_path,
             reveal_path,

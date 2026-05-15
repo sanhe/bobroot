@@ -52,6 +52,18 @@ export const DEFAULT_TERMINAL_APPEARANCE: TerminalAppearance = {
   fontSize: 12,
 };
 
+export type AudioPlaybackMode = "bobroot" | "system" | "custom";
+
+export interface AudioPlaybackSettings {
+  mode: AudioPlaybackMode;
+  customPlayer: string;
+}
+
+export const DEFAULT_AUDIO_PLAYBACK_SETTINGS: AudioPlaybackSettings = {
+  mode: "bobroot",
+  customPlayer: "",
+};
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -120,6 +132,7 @@ export interface SessionData {
   visibility: Record<PanelRef, boolean>;
   filePropertyVisibility: FilePropertyVisibility;
   terminalAppearance: TerminalAppearance;
+  audioPlayback: AudioPlaybackSettings;
   window: WindowSession | null;
 }
 

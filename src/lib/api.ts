@@ -101,6 +101,10 @@ export async function openPath(path: string): Promise<void> {
   return invokeDesktop("open_path", { path });
 }
 
+export async function openPathWithPlayer(path: string, player: string): Promise<void> {
+  return invokeDesktop("open_path_with_player", { path, player });
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   return invokeDesktop("open_external_url", { url });
 }

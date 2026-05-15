@@ -1,5 +1,7 @@
 import { buildLayoutFromLegacy, normalizeLayout } from "./layout";
 import type {
+  AudioPlaybackMode,
+  AudioPlaybackSettings,
   FilePropertyVisibility,
   LayoutNode,
   PanelId,
@@ -11,6 +13,7 @@ import type {
   TerminalTheme,
 } from "./types";
 import {
+  DEFAULT_AUDIO_PLAYBACK_SETTINGS,
   DEFAULT_FILE_PROPERTY_VISIBILITY,
   DEFAULT_TERMINAL_APPEARANCE,
 } from "./types";
@@ -88,6 +91,7 @@ export function normalizeSession(
     visibility,
     filePropertyVisibility: normalizeFilePropertyVisibility(session.filePropertyVisibility),
     terminalAppearance: normalizeTerminalAppearance(session.terminalAppearance),
+    audioPlayback: normalizeAudioPlaybackSettings(session.audioPlayback),
     window: session.window ?? null,
   };
 }
@@ -116,6 +120,24 @@ function normalizeTerminalAppearance(
   return {
     theme,
     fontSize,
+  };
+}
+
+function normalizeAudioPlaybackSettings(
+  settings: Partial<AudioPlaybackSettings> | undefined,
+): AudioPlaybackSettings {
+  const mode: AudioPlaybackMode =
+    settings?.mode === "system" || settings?.mode === "custom" || settings?.mode === "bobroot"
+      ? settings.mode
+      : DEFAULT_AUDIO_PLAYBACK_SETTINGS.mode;
+  const customPlayer =
+    typeof settings?.customPlayer === "string"
+      ? settings.customPlayer.slice(0, 512)
+      : DEFAULT_AUDIO_PLAYBACK_SETTINGS.customPlayer;
+
+  return {
+    mode,
+    customPlayer,
   };
 }
 

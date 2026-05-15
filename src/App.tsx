@@ -12,6 +12,7 @@ import {
   FolderPlus,
   FolderSync,
   MoveRight,
+  Music2,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
@@ -30,6 +31,7 @@ import {
   moveItems,
   moveToTrash,
   openPath,
+  openPathWithPlayer,
   permanentlyDelete,
   previewPath,
   revealPath,
@@ -63,6 +65,8 @@ import {
 } from "./lib/platform";
 import type {
   ActionLogDetails,
+  AudioPlaybackMode,
+  AudioPlaybackSettings,
   ConflictStrategy,
   DirectoryListing,
   FileEntry,
@@ -79,6 +83,7 @@ import type {
   TerminalAppearance,
 } from "./lib/types";
 import {
+  DEFAULT_AUDIO_PLAYBACK_SETTINGS,
   DEFAULT_FILE_PROPERTY_VISIBILITY,
   DEFAULT_TERMINAL_APPEARANCE,
 } from "./lib/types";
@@ -176,6 +181,8 @@ function App() {
     session?.filePropertyVisibility ?? DEFAULT_FILE_PROPERTY_VISIBILITY;
   const terminalAppearance =
     session?.terminalAppearance ?? DEFAULT_TERMINAL_APPEARANCE;
+  const audioPlaybackSettings =
+    session?.audioPlayback ?? DEFAULT_AUDIO_PLAYBACK_SETTINGS;
 
   const reportNotice = useCallback((message: string | null) => {
     setNotice(message);
@@ -387,6 +394,7 @@ function App() {
               visibility: { left: true, right: true, terminal: false, agent: false },
               filePropertyVisibility: { ...DEFAULT_FILE_PROPERTY_VISIBILITY },
               terminalAppearance: { ...DEFAULT_TERMINAL_APPEARANCE },
+              audioPlayback: { ...DEFAULT_AUDIO_PLAYBACK_SETTINGS },
               window: null,
             };
 
@@ -1386,15 +1394,50 @@ function App() {
     if (isAudioPreviewEntry(entry)) {
       setContextMenu(null);
       setRenameState(null);
-      flushSync(() => {
-        setAudioPreview({
-          name: entry.name,
-          path: entry.path,
-          src: convertFileSrc(entry.path),
+
+      if (session.audioPlayback.mode === "bobroot") {
+        flushSync(() => {
+          setAudioPreview({
+            name: entry.name,
+            path: entry.path,
+            src: convertFileSrc(entry.path),
+          });
         });
-      });
-      recordAction("audio_preview_opened", { path: entry.path });
-      reportNotice(null);
+        recordAction("audio_preview_opened", { path: entry.path });
+        reportNotice(null);
+        return;
+      }
+
+      const customPlayer = session.audioPlayback.customPlayer.trim();
+      if (session.audioPlayback.mode === "custom" && customPlayer.length === 0) {
+        recordAction("audio_player_blocked", {
+          path: entry.path,
+          reason: "missing_custom_player",
+        });
+        reportNotice("Choose an audio player in Audio settings.");
+        return;
+      }
+
+      try {
+        if (session.audioPlayback.mode === "system") {
+          await openPath(entry.path);
+        } else {
+          await openPathWithPlayer(entry.path, customPlayer);
+        }
+        recordAction("audio_player_opened", {
+          path: entry.path,
+          mode: session.audioPlayback.mode,
+          player: session.audioPlayback.mode === "custom" ? customPlayer : null,
+        });
+        reportNotice(null);
+      } catch (error) {
+        recordAction("audio_player_failed", {
+          path: entry.path,
+          mode: session.audioPlayback.mode,
+          error: errorToMessage(error),
+        });
+        reportNotice(errorToMessage(error));
+      }
       return;
     }
 
@@ -1499,6 +1542,26 @@ function App() {
           ? {
               ...previous,
               terminalAppearance: appearance,
+            }
+          : previous,
+      );
+    },
+    [recordAction],
+  );
+
+  const changeAudioPlaybackSettings = useCallback(
+    (settings: AudioPlaybackSettings) => {
+      recordAction("change_audio_playback_settings", {
+        mode: settings.mode,
+        hasCustomPlayer: settings.customPlayer.trim().length > 0,
+      });
+      setContextMenu(null);
+      setRenameState(null);
+      setSession((previous) =>
+        previous
+          ? {
+              ...previous,
+              audioPlayback: settings,
             }
           : previous,
       );
@@ -1732,7 +1795,12 @@ function App() {
           >
             {showHiddenFiles ? <Eye size={16} /> : <EyeOff size={16} />}
           </IconButton>
-          <IconButton label="Quick Look (Space)" onClick={() => void previewSelected()}>
+          <AudioPlaybackControl
+            platform={platform}
+            settings={audioPlaybackSettings}
+            onChange={changeAudioPlaybackSettings}
+          />
+          <IconButton label="Preview selected item (Space)" onClick={() => void previewSelected()}>
             <Eye size={16} />
           </IconButton>
         </div>
@@ -1859,6 +1927,127 @@ function App() {
       ) : null}
     </main>
   );
+}
+
+function AudioPlaybackControl({
+  platform,
+  settings,
+  onChange,
+}: {
+  platform: ReturnType<typeof currentPlatform>;
+  settings: AudioPlaybackSettings;
+  onChange: (settings: AudioPlaybackSettings) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const closeOnOutsidePointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", closeOnOutsidePointerDown, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnOutsidePointerDown, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const updateSettings = (updates: Partial<AudioPlaybackSettings>) => {
+    onChange({
+      ...settings,
+      ...updates,
+    });
+  };
+
+  return (
+    <div className="audio-playback-menu" ref={menuRef}>
+      <IconButton
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={open ? "pressed" : ""}
+        label={`Audio player: ${audioPlaybackModeLabel(settings.mode)}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        <Music2 size={16} />
+      </IconButton>
+      {open ? (
+        <div
+          aria-label="Audio playback settings"
+          className="audio-playback-popover"
+          onClick={(event) => event.stopPropagation()}
+          role="dialog"
+        >
+          <label className="audio-playback-field">
+            <span>Audio player</span>
+            <select
+              aria-label="Audio player for Space"
+              onChange={(event) =>
+                updateSettings({ mode: event.target.value as AudioPlaybackMode })
+              }
+              value={settings.mode}
+            >
+              <option value="bobroot">Bobroot player</option>
+              <option value="system">System default</option>
+              <option value="custom">Selected player</option>
+            </select>
+          </label>
+          {settings.mode === "custom" ? (
+            <label className="audio-playback-field">
+              <span>Player app</span>
+              <input
+                aria-label="Selected audio player"
+                autoFocus
+                maxLength={512}
+                onChange={(event) =>
+                  updateSettings({ customPlayer: event.target.value })
+                }
+                placeholder={audioPlayerPlaceholder(platform)}
+                value={settings.customPlayer}
+              />
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function audioPlaybackModeLabel(mode: AudioPlaybackMode): string {
+  if (mode === "system") {
+    return "System default";
+  }
+  if (mode === "custom") {
+    return "Selected player";
+  }
+  return "Bobroot player";
+}
+
+function audioPlayerPlaceholder(platform: ReturnType<typeof currentPlatform>): string {
+  if (platform === "macos") {
+    return "Music, QuickTime Player, /Applications/VLC.app";
+  }
+  if (platform === "windows") {
+    return "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe";
+  }
+  return "vlc or /usr/bin/vlc";
 }
 
 function AudioPreviewDialog({
